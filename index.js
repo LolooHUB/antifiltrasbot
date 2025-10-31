@@ -1,39 +1,56 @@
-import { Client, GatewayIntentBits, EmbedBuilder, Collection, PermissionsBitField } from "discord.js";
+import { Client, GatewayIntentBits, EmbedBuilder, Collection, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField, Partials } from "discord.js";
 import fs from "fs";
 import path from "path";
-import { db } from "./firebase.js"; // 🔹 Import nombrado, no default
+import { db } from "./firebase.js";
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
   ],
+  partials: [Partials.Channel],
 });
 
 client.commands = new Collection();
 
-// IDs fijas según tu configuración
+// IDs fijas
 const SERVER_ID = "1400709679398654043";
 const REPORT_CHANNEL_ID = "1412420238284423208";
 const GLOBAL_BANS_CHANNEL_ID = "1412415386971799693";
 const LOGS_CHANNEL_ID = "1433599445114814555";
 const COMMAND_CHANNEL_ID = "1433600237024448642";
 
-// Cargar comandos automáticamente
+// -------------------- CARGA DE COMANDOS --------------------
 const commandsPath = path.join(process.cwd(), "comandos");
-for (const file of fs.readdirSync(commandsPath)) {
-  if (file.endsWith(".js")) {
-    import(`./comandos/${file}`).then((module) => {
-      if (module.default && module.default.data && module.default.execute) {
-        client.commands.set(module.default.data.name, module.default);
-      }
-    }).catch(console.error);
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+
+for (const file of commandFiles) {
+  try {
+    const cmd = await import(`./comandos/${file}`);
+    if (cmd.default && cmd.default.data && cmd.default.execute) {
+      client.commands.set(cmd.default.data.name, cmd.default);
+      console.log(`✅ Comando cargado: ${cmd.default.data.name}`);
+    } else {
+      console.warn(`⚠️ Comando ${file} no tiene data o execute`);
+    }
+  } catch (err) {
+    console.error(`❌ Error cargando comando ${file}:`, err);
   }
 }
 
-// Cuando se ejecuta un comando
+// -------------------- INTERACTIONS --------------------
 client.on("interactionCreate", async (interaction) => {
+  if (interaction.isButton()) {
+    // BOTÓN de reporte
+    if (interaction.customId === "crear_ticket") {
+      await interaction.reply({ content: "Ticket creado! ✅", ephemeral: true });
+      // Aquí podés crear un canal o manejar el ticket
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   // Restringir canal de comandos
@@ -46,7 +63,6 @@ client.on("interactionCreate", async (interaction) => {
   if (!command) return;
 
   try {
-    // Pasamos Firestore y IDs globales a cada comando
     await command.execute(interaction, { db, GLOBAL_BANS_CHANNEL_ID, LOGS_CHANNEL_ID });
   } catch (err) {
     console.error(err);
@@ -54,7 +70,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// Evento ready
+// -------------------- READY --------------------
 client.once("ready", async () => {
   console.log(`✅ AntiFiltras Bot conectado como ${client.user.tag}`);
 
@@ -63,15 +79,22 @@ client.once("ready", async () => {
     .setDescription("Presiona el botón de abajo para crear un ticket de reporte.")
     .setColor("Blurple");
 
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("crear_ticket")
+      .setLabel("📩 Crear Ticket")
+      .setStyle(ButtonStyle.Primary)
+  );
+
   const channel = client.channels.cache.get(REPORT_CHANNEL_ID);
   if (channel) {
-    channel.send({ embeds: [reportEmbed] }).catch(console.log);
+    channel.send({ embeds: [reportEmbed], components: [row] }).catch(console.log);
   }
 });
 
-// Login usando token del workflow
+// -------------------- LOGIN --------------------
 if (!process.env.BOT_TOKEN) {
-  console.error("❌ No se encontró el BOT_TOKEN en las variables de entorno.");
+  console.error("❌ No se encontró BOT_TOKEN en las variables de entorno.");
   process.exit(1);
 }
 
