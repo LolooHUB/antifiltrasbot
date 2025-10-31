@@ -1,10 +1,14 @@
 import { Client, GatewayIntentBits, EmbedBuilder, Collection, PermissionsBitField } from "discord.js";
 import fs from "fs";
 import path from "path";
-import app from "./firebase.js";
+import { db } from "./firebase.js"; // 🔹 Import nombrado, no default
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ],
 });
 
 client.commands = new Collection();
@@ -20,9 +24,11 @@ const COMMAND_CHANNEL_ID = "1433600237024448642";
 const commandsPath = path.join(process.cwd(), "comandos");
 for (const file of fs.readdirSync(commandsPath)) {
   if (file.endsWith(".js")) {
-    import(`./comandos/${file}`).then((cmd) => {
-      client.commands.set(cmd.default.data.name, cmd.default);
-    });
+    import(`./comandos/${file}`).then((module) => {
+      if (module.default && module.default.data && module.default.execute) {
+        client.commands.set(module.default.data.name, module.default);
+      }
+    }).catch(console.error);
   }
 }
 
@@ -40,15 +46,16 @@ client.on("interactionCreate", async (interaction) => {
   if (!command) return;
 
   try {
-    await command.execute(interaction, { GLOBAL_BANS_CHANNEL_ID, LOGS_CHANNEL_ID });
+    // Pasamos Firestore y IDs globales a cada comando
+    await command.execute(interaction, { db, GLOBAL_BANS_CHANNEL_ID, LOGS_CHANNEL_ID });
   } catch (err) {
     console.error(err);
-    await interaction.reply({ content: "Hubo un error al ejecutar este comando.", ephemeral: true });
+    await interaction.reply({ content: "❌ Hubo un error al ejecutar este comando.", ephemeral: true });
   }
 });
 
 // Evento ready
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log(`✅ AntiFiltras Bot conectado como ${client.user.tag}`);
 
   const reportEmbed = new EmbedBuilder()
@@ -62,5 +69,10 @@ client.once("ready", () => {
   }
 });
 
-// Login usando secret del workflow
+// Login usando token del workflow
+if (!process.env.BOT_TOKEN) {
+  console.error("❌ No se encontró el BOT_TOKEN en las variables de entorno.");
+  process.exit(1);
+}
+
 client.login(process.env.BOT_TOKEN);
