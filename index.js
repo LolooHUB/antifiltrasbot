@@ -1,144 +1,123 @@
 import { 
   Client, 
   GatewayIntentBits, 
-  Partials, 
-  Collection, 
   EmbedBuilder, 
-  ActionRowBuilder, 
   ButtonBuilder, 
-  ButtonStyle 
+  ButtonStyle, 
+  ActionRowBuilder, 
+  Collection 
 } from "discord.js";
 import fs from "fs";
 import path from "path";
-import { db } from "./firebase.js";
+import app from "./firebase.js";
 
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent
   ],
-  partials: [Partials.Channel],
 });
 
 client.commands = new Collection();
 
-// -------------------- IDS --------------------
+// 🔹 CONFIG
 const SERVER_ID = "1400709679398654043";
 const REPORT_CHANNEL_ID = "1412420238284423208";
-const GLOBAL_BANS_CHANNEL_ID = "1412415386971799693";
-const LOGS_CHANNEL_ID = "1433599445114814555";
-const COMMAND_CHANNEL_ID = "1433600237024448642";
-const STAFF_ROLE_ID = "ID_ROL_STAFF"; // Cambiar por tu rol de staff
+const STAFF_ROLE_ID = "PONER_ID_DEL_ROL_STAFF_AQUI"; // <-- CAMBIA ESTO
 
-// -------------------- CARGA DE COMANDOS --------------------
-async function loadCommands() {
-  const commandsPath = path.join(process.cwd(), "comandos");
-  const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith(".js"));
-
-  for (const file of commandFiles) {
-    try {
-      const cmd = await import(`./comandos/${file}`);
-      if (cmd.default && cmd.default.data && cmd.default.execute) {
+// 🔹 CARGAR COMANDOS AUTOMÁTICAMENTE
+const commandsPath = path.join(process.cwd(), "comandos");
+for (const file of fs.readdirSync(commandsPath)) {
+  if (file.endsWith(".js")) {
+    import(`./comandos/${file}`).then((cmd) => {
+      if (cmd.default?.data?.name) {
         client.commands.set(cmd.default.data.name, cmd.default);
         console.log(`✅ Comando cargado: ${cmd.default.data.name}`);
-      } else {
-        console.warn(`⚠️ Comando ${file} no tiene data o execute`);
       }
+    }).catch(console.error);
+  }
+}
+
+// 🔹 MANEJAR COMANDOS
+client.on("interactionCreate", async (interaction) => {
+  if (interaction.isChatInputCommand()) {
+    const command = client.commands.get(interaction.commandName);
+    if (!command) return;
+    try {
+      await command.execute(interaction);
     } catch (err) {
-      console.error(`❌ Error cargando comando ${file}:`, err);
+      console.error(err);
+      if (!interaction.replied) {
+        await interaction.reply({ content: "❌ Hubo un error ejecutando el comando.", ephemeral: true });
+      }
     }
   }
-}
 
-// -------------------- INTERACTIONS --------------------
-client.on("interactionCreate", async (interaction) => {
-  // ----------------- BOTONES -----------------
-  if (interaction.isButton()) {
-    if (interaction.customId === "crear_ticket") {
-  const guild = interaction.guild;
-  if (!guild) return;
+  // 🔹 BOTÓN DE CREAR TICKET
+  if (interaction.isButton() && interaction.customId === "crear_ticket") {
+    const guild = interaction.guild;
+    if (!guild) return;
 
-  const channelName = `ticket-${interaction.user.id}`;
-  const existingChannel = guild.channels.cache.find(c => c.name === channelName);
-  if (existingChannel) {
-    return interaction.reply({ content: "Ya tienes un ticket abierto!", ephemeral: true });
-  }
+    const existingChannel = guild.channels.cache.find(c => c.name === `ticket-${interaction.user.id}`);
+    if (existingChannel) {
+      return interaction.reply({ content: "❌ Ya tienes un ticket abierto.", ephemeral: true });
+    }
 
-  const overwrites = [
-    { id: guild.roles.everyone.id, deny: ["ViewChannel"] },
-    { id: interaction.user.id, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] }
-  ];
+    const overwrites = [
+      { id: guild.roles.everyone.id, deny: ["ViewChannel"] },
+      { id: interaction.user.id, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] }
+    ];
 
-  if (STAFF_ROLE_ID && guild.roles.cache.has(STAFF_ROLE_ID)) {
-    overwrites.push({ id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] });
-  }
+    if (STAFF_ROLE_ID && guild.roles.cache.has(STAFF_ROLE_ID)) {
+      overwrites.push({ id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] });
+    }
 
-  const ticketChannel = await guild.channels.create({
-    name: channelName,
-    type: 0,
-    permissionOverwrites: overwrites,
-  });
+    const ticketChannel = await guild.channels.create({
+      name: `ticket-${interaction.user.id}`,
+      type: 0, // Canal de texto
+      permissionOverwrites: overwrites
+    });
 
-  const ticketEmbed = new EmbedBuilder()
-    .setTitle("📨 Nuevo ticket")
-    .setDescription(`Ticket creado por ${interaction.user.tag}`)
-    .setColor("Blurple")
-    .setTimestamp();
+    const ticketEmbed = new EmbedBuilder()
+      .setTitle("📨 Nuevo ticket creado")
+      .setDescription(`Ticket de ${interaction.user.tag}\nUsá este canal para detallar tu reporte.`)
+      .setColor("Blurple");
 
-  await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [ticketEmbed] });
-  return interaction.reply({ content: `✅ Ticket creado: ${ticketChannel}`, ephemeral: true });
-}
+    await ticketChannel.send({ 
+      content: `<@${interaction.user.id}>`, 
+      embeds: [ticketEmbed] 
+    });
 
-  }
-
-  // ----------------- SLASH COMMANDS -----------------
-  if (!interaction.isChatInputCommand()) return;
-
-  if (interaction.channelId !== COMMAND_CHANNEL_ID) {
-    return interaction.reply({ content: "❌ Los comandos solo pueden usarse en el canal autorizado.", ephemeral: true });
-  }
-
-  const command = client.commands.get(interaction.commandName);
-  if (!command) return;
-
-  try {
-    await command.execute(interaction, { db, GLOBAL_BANS_CHANNEL_ID, LOGS_CHANNEL_ID });
-  } catch (err) {
-    console.error(err);
-    await interaction.reply({ content: "❌ Hubo un error al ejecutar este comando.", ephemeral: true });
+    // 🔹 Importante: usar followUp después de crear el canal
+    return interaction.reply({ 
+      content: `✅ Ticket creado correctamente: ${ticketChannel}`, 
+      ephemeral: true 
+    });
   }
 });
 
-// -------------------- READY --------------------
+// 🔹 AL INICIAR
 client.once("ready", async () => {
   console.log(`✅ AntiFiltras Bot conectado como ${client.user.tag}`);
 
-  await loadCommands();
-
-  const reportEmbed = new EmbedBuilder()
-    .setTitle("📨 Reportar usuario")
-    .setDescription("Presiona el botón de abajo para crear un ticket de reporte.")
-    .setColor("Blurple");
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("crear_ticket")
-      .setLabel("📩 Crear Ticket")
-      .setStyle(ButtonStyle.Primary)
-  );
-
   const channel = client.channels.cache.get(REPORT_CHANNEL_ID);
   if (channel) {
-    channel.send({ embeds: [reportEmbed], components: [row] }).catch(console.log);
+    const embed = new EmbedBuilder()
+      .setTitle("📢 Reportar usuario")
+      .setDescription("Presiona el botón para crear un ticket de reporte con el staff.")
+      .setColor("Blurple");
+
+    const boton = new ButtonBuilder()
+      .setCustomId("crear_ticket")
+      .setLabel("🎫 Crear ticket")
+      .setStyle(ButtonStyle.Primary);
+
+    const fila = new ActionRowBuilder().addComponents(boton);
+
+    await channel.send({ embeds: [embed], components: [fila] });
   }
 });
 
-// -------------------- LOGIN --------------------
-if (!process.env.BOT_TOKEN) {
-  console.error("❌ No se encontró BOT_TOKEN en las variables de entorno.");
-  process.exit(1);
-}
-
+// 🔹 LOGIN
 client.login(process.env.BOT_TOKEN);
