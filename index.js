@@ -1,4 +1,13 @@
-import { Client, GatewayIntentBits, EmbedBuilder, Collection, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField, Partials } from "discord.js";
+import { 
+  Client, 
+  GatewayIntentBits, 
+  Partials, 
+  Collection, 
+  EmbedBuilder, 
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle 
+} from "discord.js";
 import fs from "fs";
 import path from "path";
 import { db } from "./firebase.js";
@@ -15,48 +24,75 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// IDs fijas
+// -------------------- IDS --------------------
 const SERVER_ID = "1400709679398654043";
 const REPORT_CHANNEL_ID = "1412420238284423208";
 const GLOBAL_BANS_CHANNEL_ID = "1412415386971799693";
 const LOGS_CHANNEL_ID = "1433599445114814555";
 const COMMAND_CHANNEL_ID = "1433600237024448642";
+const STAFF_ROLE_ID = "ID_ROL_STAFF"; // Cambiar por tu rol de staff
 
 // -------------------- CARGA DE COMANDOS --------------------
-const commandsPath = path.join(process.cwd(), "comandos");
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+async function loadCommands() {
+  const commandsPath = path.join(process.cwd(), "comandos");
+  const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith(".js"));
 
-for (const file of commandFiles) {
-  try {
-    const cmd = await import(`./comandos/${file}`);
-    if (cmd.default && cmd.default.data && cmd.default.execute) {
-      client.commands.set(cmd.default.data.name, cmd.default);
-      console.log(`✅ Comando cargado: ${cmd.default.data.name}`);
-    } else {
-      console.warn(`⚠️ Comando ${file} no tiene data o execute`);
+  for (const file of commandFiles) {
+    try {
+      const cmd = await import(`./comandos/${file}`);
+      if (cmd.default && cmd.default.data && cmd.default.execute) {
+        client.commands.set(cmd.default.data.name, cmd.default);
+        console.log(`✅ Comando cargado: ${cmd.default.data.name}`);
+      } else {
+        console.warn(`⚠️ Comando ${file} no tiene data o execute`);
+      }
+    } catch (err) {
+      console.error(`❌ Error cargando comando ${file}:`, err);
     }
-  } catch (err) {
-    console.error(`❌ Error cargando comando ${file}:`, err);
   }
 }
 
 // -------------------- INTERACTIONS --------------------
 client.on("interactionCreate", async (interaction) => {
+  // ----------------- BOTONES -----------------
   if (interaction.isButton()) {
-    // BOTÓN de reporte
     if (interaction.customId === "crear_ticket") {
-      await interaction.reply({ content: "Ticket creado! ✅", ephemeral: true });
-      // Aquí podés crear un canal o manejar el ticket
+      const guild = interaction.guild;
+      if (!guild) return;
+
+      const channelName = `ticket-${interaction.user.id}`;
+      const existingChannel = guild.channels.cache.find(c => c.name === channelName);
+      if (existingChannel) {
+        return interaction.reply({ content: "Ya tienes un ticket abierto!", ephemeral: true });
+      }
+
+      const ticketChannel = await guild.channels.create({
+        name: channelName,
+        type: 0, // GUILD_TEXT
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: ["ViewChannel"] },
+          { id: interaction.user.id, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] },
+          { id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] },
+        ],
+      });
+
+      const ticketEmbed = new EmbedBuilder()
+        .setTitle("📨 Nuevo ticket")
+        .setDescription(`Ticket creado por ${interaction.user.tag}`)
+        .setColor("Blurple")
+        .setTimestamp();
+
+      await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [ticketEmbed] });
+      return interaction.reply({ content: `✅ Ticket creado: ${ticketChannel}`, ephemeral: true });
     }
     return;
   }
 
+  // ----------------- SLASH COMMANDS -----------------
   if (!interaction.isChatInputCommand()) return;
 
-  // Restringir canal de comandos
   if (interaction.channelId !== COMMAND_CHANNEL_ID) {
-    await interaction.reply({ content: "❌ Los comandos solo pueden usarse en el canal autorizado.", ephemeral: true });
-    return;
+    return interaction.reply({ content: "❌ Los comandos solo pueden usarse en el canal autorizado.", ephemeral: true });
   }
 
   const command = client.commands.get(interaction.commandName);
@@ -73,6 +109,8 @@ client.on("interactionCreate", async (interaction) => {
 // -------------------- READY --------------------
 client.once("ready", async () => {
   console.log(`✅ AntiFiltras Bot conectado como ${client.user.tag}`);
+
+  await loadCommands();
 
   const reportEmbed = new EmbedBuilder()
     .setTitle("📨 Reportar usuario")
