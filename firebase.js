@@ -1,8 +1,10 @@
-// Import the functions you need from the SDKs you need
+// firebase.js
+// Importar solo lo que se puede usar en Node.js
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration
+// Configuración de Firebase (la tuya)
 const firebaseConfig = {
   apiKey: "AIzaSyAEUOzOWdq0xs3qiIlX1RzB6bpKkkMLykA",
   authDomain: "antifiltras-7116d.firebaseapp.com",
@@ -10,12 +12,18 @@ const firebaseConfig = {
   projectId: "antifiltras-7116d",
   storageBucket: "antifiltras-7116d.firebasestorage.app",
   messagingSenderId: "795745598666",
-  appId: "1:795745598666:web:72b77816d3c2a3c17f8833",
-  measurementId: "G-8NS1EX4ZF3"
+  appId: "1:795745598666:web:72b77816d3c2a3c17f8833"
+  // measurementId no se usa en Node.js
 };
 
-// Initialize Firebase
+// Inicializar Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
 
-export default app;
+// Firestore (Base de datos)
+const db = getFirestore(app);
+
+// Auth (Autenticación)
+const auth = getAuth(app);
+
+// Exportar todo para usar en otros archivos
+export { app, db, auth };
