@@ -57,35 +57,40 @@ client.on("interactionCreate", async (interaction) => {
   // ----------------- BOTONES -----------------
   if (interaction.isButton()) {
     if (interaction.customId === "crear_ticket") {
-      const guild = interaction.guild;
-      if (!guild) return;
+  const guild = interaction.guild;
+  if (!guild) return;
 
-      const channelName = `ticket-${interaction.user.id}`;
-      const existingChannel = guild.channels.cache.find(c => c.name === channelName);
-      if (existingChannel) {
-        return interaction.reply({ content: "Ya tienes un ticket abierto!", ephemeral: true });
-      }
+  const channelName = `ticket-${interaction.user.id}`;
+  const existingChannel = guild.channels.cache.find(c => c.name === channelName);
+  if (existingChannel) {
+    return interaction.reply({ content: "Ya tienes un ticket abierto!", ephemeral: true });
+  }
 
-      const ticketChannel = await guild.channels.create({
-        name: channelName,
-        type: 0, // GUILD_TEXT
-        permissionOverwrites: [
-          { id: guild.roles.everyone.id, deny: ["ViewChannel"] },
-          { id: interaction.user.id, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] },
-          { id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] },
-        ],
-      });
+  const overwrites = [
+    { id: guild.roles.everyone.id, deny: ["ViewChannel"] },
+    { id: interaction.user.id, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] }
+  ];
 
-      const ticketEmbed = new EmbedBuilder()
-        .setTitle("📨 Nuevo ticket")
-        .setDescription(`Ticket creado por ${interaction.user.tag}`)
-        .setColor("Blurple")
-        .setTimestamp();
+  if (STAFF_ROLE_ID && guild.roles.cache.has(STAFF_ROLE_ID)) {
+    overwrites.push({ id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"] });
+  }
 
-      await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [ticketEmbed] });
-      return interaction.reply({ content: `✅ Ticket creado: ${ticketChannel}`, ephemeral: true });
-    }
-    return;
+  const ticketChannel = await guild.channels.create({
+    name: channelName,
+    type: 0,
+    permissionOverwrites: overwrites,
+  });
+
+  const ticketEmbed = new EmbedBuilder()
+    .setTitle("📨 Nuevo ticket")
+    .setDescription(`Ticket creado por ${interaction.user.tag}`)
+    .setColor("Blurple")
+    .setTimestamp();
+
+  await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [ticketEmbed] });
+  return interaction.reply({ content: `✅ Ticket creado: ${ticketChannel}`, ephemeral: true });
+}
+
   }
 
   // ----------------- SLASH COMMANDS -----------------
