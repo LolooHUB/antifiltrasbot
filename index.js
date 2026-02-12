@@ -1,4 +1,17 @@
-const { Client, GatewayIntentBits, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { 
+    Client, 
+    GatewayIntentBits, 
+    Collection, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    ModalBuilder, 
+    TextInputBuilder, 
+    TextInputStyle, 
+    ChannelType, 
+    PermissionFlagsBits 
+} = require('discord.js');
 const { db } = require('./firebase');
 const fs = require('node:fs');
 
@@ -11,68 +24,78 @@ const client = new Client({
     ] 
 });
 
-client.commands = new Collection();
+// CONFIGURACIÓN DE IDs
 const ROL_TICKETS = '1433602012163080293';
-const CANAL_TICKETS_ID = 'ID_DE_TU_CANAL_TICKETS'; // <--- COLOCA AQUÍ EL ID DEL CANAL
+const CANAL_TICKETS_ID = '1412420238284423208'; // ID ACTUALIZADO
 
-// Carga de Comandos
+client.commands = new Collection();
 const commandFiles = fs.readdirSync('./commands').filter(f => f.endsWith('.js'));
 for (const file of commandFiles) {
     const cmd = require(`./commands/${file}`);
     client.commands.set(cmd.data.name, cmd);
 }
 
+// --- PANEL DE TICKETS (READY) ---
 client.once('ready', async () => {
-    console.log(`Bot conectado como ${client.user.tag}`);
+    console.log(`✅ Bot online: ${client.user.tag}`);
 
-    // LÓGICA DEL PANEL AUTO-LIMPIABLE
     const channel = client.channels.cache.get(CANAL_TICKETS_ID);
-    if (channel) {
-        // Buscar y borrar mensajes previos del bot para no spamear
-        const messages = await channel.messages.fetch({ limit: 50 });
-        const botMessages = messages.filter(m => m.author.id === client.user.id);
-        if (botMessages.size > 0) await channel.bulkDelete(botMessages).catch(() => null);
+    if (!channel) return console.error("❌ No encuentro el canal de tickets.");
 
-        // Enviar nuevo panel
+    try {
+        // Limpiar mensajes previos del bot
+        const messages = await channel.messages.fetch({ limit: 50 }).catch(() => new Map());
+        const botMessages = messages.filter(m => m.author.id === client.user.id);
+        
+        if (botMessages.size > 0) {
+            await channel.bulkDelete(botMessages).catch(async () => {
+                for (const m of botMessages.values()) await m.delete().catch(() => null);
+            });
+        }
+
         const embed = new EmbedBuilder()
-            .setTitle("📩 Centro de Reportes")
-            .setDescription("Haz clic en el botón de abajo para reportar a un usuario o filtrador.\n\n**Recuerda tener evidencia preparada.**")
+            .setTitle("📩 Reportar Usuario / Filtrador")
+            .setDescription("Si tienes pruebas de un usuario filtrador, abre un ticket con el botón de abajo.")
             .setColor("#ff0000");
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('btn_ticket')
-                .setLabel('Abrir Reporte')
+                .setLabel('Abrir Ticket')
                 .setStyle(ButtonStyle.Danger)
                 .setEmoji('⚠️')
         );
 
         await channel.send({ embeds: [embed], components: [row] });
+        console.log("✅ Panel enviado al canal corregido.");
+    } catch (err) {
+        console.error("❌ Error enviando panel:", err);
     }
 });
 
-client.on('interactionCreate', async i => {
+// --- INTERACCIONES ---
+client.on('interactionCreate', async (i) => {
     if (i.isChatInputCommand()) {
         const command = client.commands.get(i.commandName);
         if (command) await command.execute(i);
     }
 
     if (i.isButton() && i.customId === 'btn_ticket') {
-        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar Filtrador');
+        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reporte');
         modal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('Usuario Reportado').setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Evidencia (Texto)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Info Extra').setStyle(TextInputStyle.Paragraph).setRequired(false))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel("Usuario").setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel("Evidencia (Texto)").setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel("Opcional").setStyle(TextInputStyle.Paragraph).setRequired(false))
         );
         await i.showModal(modal);
     }
 
     if (i.isModalSubmit() && i.customId === 'mdl_reporte') {
-        const userRep = i.fields.getTextInputValue('u');
-        const txtEv = i.fields.getTextInputValue('e');
-        const extra = i.fields.getTextInputValue('o') || 'N/A';
+        const target = i.fields.getTextInputValue('u');
+        const ev = i.fields.getTextInputValue('e');
+        const opt = i.fields.getTextInputValue('o') || 'N/A';
 
-        const ch = await i.guild.channels.create({
+        const ticket = await i.guild.channels.create({
             name: `reporte-${i.user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
@@ -82,24 +105,14 @@ client.on('interactionCreate', async i => {
             ]
         });
 
-        const embed = new EmbedBuilder()
-            .setTitle("🛡️ Nuevo Ticket de Reporte")
-            .addFields(
-                { name: "👤 Reportado", value: userRep },
-                { name: "📄 Evidencia", value: txtEv },
-                { name: "➕ Extra", value: extra }
-            )
-            .setColor("Blue")
-            .setFooter({ text: "Sube tus imágenes/videos en este canal." });
+        const emb = new EmbedBuilder()
+            .setTitle("🛡️ Nuevo Reporte")
+            .addFields({name: "Reportado", value: target}, {name: "Texto", value: ev}, {name: "Extra", value: opt})
+            .setColor("Blue");
 
-        await ch.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [embed] });
-        await i.reply({ content: `Ticket abierto: ${ch}`, ephemeral: true });
+        await ticket.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [emb] });
+        await i.reply({ content: `Ticket: ${ticket}`, ephemeral: true });
     }
 });
-
-if (!process.env.BOT_TOKEN) {
-    console.error("ERROR: La variable BOT_TOKEN no está definida en el entorno.");
-    process.exit(1);
-}
 
 client.login(process.env.BOT_TOKEN);
