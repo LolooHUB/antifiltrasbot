@@ -10,7 +10,7 @@ jobs:
     
     # Definimos las variables de entorno para que el código pueda leer los Secrets
     env:
-      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      DISCORD_TOKEN: ${{ secrets.BOT_TOKEN }}
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
