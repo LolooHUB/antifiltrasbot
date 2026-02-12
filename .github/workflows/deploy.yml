@@ -1,38 +1,34 @@
 name: Bot Auto-Restart y Deploy
 on:
   schedule:
-    - cron: "0 */6 * * *" # Se ejecuta cada 6 horas
-  workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
-    # Definimos las variables de entorno para que el código pueda leer los Secrets
+    # IMPORTANTE: El nombre a la izquierda es como lo lee Node.js (process.env.BOT_TOKEN)
+    # El nombre a la derecha debe ser el que pusiste en GitHub Secrets
     env:
-      DISCORD_TOKEN: ${{ secrets.BOT_TOKEN }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
     steps:
-      # 1. Descargar el código del repositorio
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Configurar el entorno de Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Versión estable recomendada para discord.js v14
+          node-version: '20'
 
-      # 3. Instalar dependencias
       - name: Install Dependencies
         run: npm install
 
-      # 4. Registrar Comandos (Ejecución directa para evitar errores de package.json)
       - name: Register Slash Commands
         run: node deploy-commands.js
 
-      # 5. Iniciar el Bot
       - name: Start Bot
         run: node index.js
