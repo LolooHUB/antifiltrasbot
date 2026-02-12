@@ -1,17 +1,35 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('./firebase');
+const fs = require('node:fs');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-// IDs CONFIGURADOS
-const ROLES_STAFF_AUTORIZADOS = ['1433601009284026540', '1400715562568519781', '1433608596871970967', '1400711250878529556'];
-const CANAL_GLOBAL_LOG = '1412415386971799693';
+// Cargar Comandos
+client.commands = new Collection();
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+for (const file of commandFiles) {
+  const command = require(`./commands/${file}`);
+  client.commands.set(command.data.name, command);
+}
+
 const ROL_TICKETS = '1433602012163080293';
 
 client.on('interactionCreate', async (interaction) => {
-  // 1. ABRIR MODAL
+  // Ejecución de Slash Commands
+  if (interaction.isChatInputCommand()) {
+    const command = client.commands.get(interaction.commandName);
+    if (!command) return;
+    try {
+      await command.execute(interaction);
+    } catch (error) {
+      console.error(error);
+      await interaction.reply({ content: 'Error ejecutando el comando.', ephemeral: true });
+    }
+  }
+
+  // Lógica de Tickets (Botón)
   if (interaction.isButton() && interaction.customId === 'abrir_ticket') {
     const modal = new ModalBuilder()
       .setCustomId('modal_reporte')
@@ -25,7 +43,7 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.showModal(modal);
   }
 
-  // 2. PROCESAR MODAL
+  // Lógica de Modal
   if (interaction.isModalSubmit() && interaction.customId === 'modal_reporte') {
     const target = interaction.fields.getTextInputValue('target');
     const evidencia = interaction.fields.getTextInputValue('evidencia');
@@ -42,17 +60,16 @@ client.on('interactionCreate', async (interaction) => {
     });
 
     const embed = new EmbedBuilder()
-      .setTitle("🛡️ Nuevo Reporte Recibido")
+      .setTitle("🛡️ Nuevo Reporte")
       .setColor(0x2b2d31)
       .addFields(
         { name: "👤 Reportado", value: target, inline: true },
         { name: "📝 Evidencia Texto", value: evidencia },
         { name: "➕ Info Opcional", value: opcional }
-      )
-      .setFooter({ text: "Sube imágenes o vídeos ahora para completar el reporte." });
+      );
 
     await channel.send({ content: `<@${interaction.user.id}> <@&${ROL_TICKETS}>`, embeds: [embed] });
-    await interaction.reply({ content: `Ticket creado: ${channel}`, ephemeral: true });
+    await interaction.reply({ content: `Ticket creado en ${channel}`, ephemeral: true });
   }
 });
 
