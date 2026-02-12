@@ -5,78 +5,54 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-// IDs Globales del Servidor Main
-const MAIN_GUILD_ID = 'TU_ID_SERVER_MAIN';
-const LOGS_BOT = '1433599445114814555';
-const REPORTES_LOG_BOT = '1433600237024448642';
-const GLOBAL_BAN_LOG = '1412415386971799693';
-const ROL_TICKETS_ID = '1433602012163080293';
+// IDs CONFIGURADOS
+const ROLES_STAFF_AUTORIZADOS = ['1433601009284026540', '1400715562568519781', '1433608596871970967', '1400711250878529556'];
+const CANAL_GLOBAL_LOG = '1412415386971799693';
+const ROL_TICKETS = '1433602012163080293';
 
-client.on('ready', () => {
-  console.log(`Bot iniciado como ${client.user.tag}`);
-  // Aquí podrías enviar el mensaje inicial del ticket si no existe
-});
-
-client.on('interactionCreate', async interaction => {
-  // Manejo de Botón para abrir Modal
-  if (interaction.isButton() && interaction.customId === 'create_ticket') {
+client.on('interactionCreate', async (interaction) => {
+  // 1. ABRIR MODAL
+  if (interaction.isButton() && interaction.customId === 'abrir_ticket') {
     const modal = new ModalBuilder()
-      .setCustomId('ticket_modal')
-      .setTitle('Reportar Usuario / Filtra');
+      .setCustomId('modal_reporte')
+      .setTitle('Reporte de Usuario / Filtra');
 
-    const userReported = new TextInputBuilder()
-      .setCustomId('user_reported')
-      .setLabel("Usuario Reportado (Nombre o ID)")
-      .setStyle(TextInputStyle.Short).setRequired(true);
-
-    const evidenceText = new TextInputBuilder()
-      .setCustomId('evidence_text')
-      .setLabel("Evidencia en formato texto")
-      .setStyle(TextInputStyle.Paragraph).setRequired(true);
-
-    const extraInfo = new TextInputBuilder()
-      .setCustomId('extra_info')
-      .setLabel("Información adicional")
-      .setStyle(TextInputStyle.Paragraph).setRequired(false);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(userReported), 
-                        new ActionRowBuilder().addComponents(evidenceText),
-                        new ActionRowBuilder().addComponents(extraInfo));
-    
-    await interaction.showModal(modal);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('target').setLabel("Usuario Reportado").setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('evidencia').setLabel("Evidencia (Texto)").setStyle(TextInputStyle.Paragraph).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('opcional').setLabel("Algo más (Opcional)").setStyle(TextInputStyle.Paragraph).setRequired(false))
+    );
+    return interaction.showModal(modal);
   }
 
-  // Manejo de Envío de Modal
-  if (interaction.isModalSubmit() && interaction.customId === 'ticket_modal') {
-    const userReported = interaction.fields.getTextInputValue('user_reported');
-    const evidenceText = interaction.fields.getTextInputValue('evidence_text');
-    const extra = interaction.fields.getTextInputValue('extra_info') || 'N/A';
+  // 2. PROCESAR MODAL
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_reporte') {
+    const target = interaction.fields.getTextInputValue('target');
+    const evidencia = interaction.fields.getTextInputValue('evidencia');
+    const opcional = interaction.fields.getTextInputValue('opcional') || "Ninguna";
 
     const channel = await interaction.guild.channels.create({
       name: `reporte-${interaction.user.username}`,
       type: ChannelType.GuildText,
       permissionOverwrites: [
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-        { id: ROL_TICKETS_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-      ],
+        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+        { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+      ]
     });
 
-    await channel.send(`<@${interaction.user.id}> <@&${ROL_TICKETS_ID}>`);
-    
     const embed = new EmbedBuilder()
-      .setTitle("Nuevo Reporte de Filtra")
+      .setTitle("🛡️ Nuevo Reporte Recibido")
+      .setColor(0x2b2d31)
       .addFields(
-        { name: "Reportado", value: userReported, inline: true },
-        { name: "Reportante", value: interaction.user.tag, inline: true },
-        { name: "Evidencia Texto", value: evidenceText },
-        { name: "Extra", value: extra }
+        { name: "👤 Reportado", value: target, inline: true },
+        { name: "📝 Evidencia Texto", value: evidencia },
+        { name: "➕ Info Opcional", value: opcional }
       )
-      .setColor(0xFF0000)
-      .setFooter({ text: "Por favor, adjunta imágenes/videos como evidencia adicional aquí." });
+      .setFooter({ text: "Sube imágenes o vídeos ahora para completar el reporte." });
 
-    await channel.send({ embeds: [embed] });
-    await interaction.reply({ content: `Ticket creado en ${channel}`, ephemeral: true });
+    await channel.send({ content: `<@${interaction.user.id}> <@&${ROL_TICKETS}>`, embeds: [embed] });
+    await interaction.reply({ content: `Ticket creado: ${channel}`, ephemeral: true });
   }
 });
 
