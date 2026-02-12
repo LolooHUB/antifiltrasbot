@@ -97,4 +97,9 @@ client.on('interactionCreate', async i => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+if (!process.env.BOT_TOKEN) {
+    console.error("ERROR: La variable BOT_TOKEN no está definida en el entorno.");
+    process.exit(1);
+}
+
+client.login(process.env.BOT_TOKEN);
