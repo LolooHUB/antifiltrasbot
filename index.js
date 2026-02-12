@@ -2,75 +2,99 @@ const { Client, GatewayIntentBits, Collection, EmbedBuilder, ActionRowBuilder, B
 const { db } = require('./firebase');
 const fs = require('node:fs');
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent
+    ] 
 });
 
-// Cargar Comandos
 client.commands = new Collection();
-const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+const ROL_TICKETS = '1433602012163080293';
+const CANAL_TICKETS_ID = 'ID_DE_TU_CANAL_TICKETS'; // <--- COLOCA AQUÍ EL ID DEL CANAL
+
+// Carga de Comandos
+const commandFiles = fs.readdirSync('./commands').filter(f => f.endsWith('.js'));
 for (const file of commandFiles) {
-  const command = require(`./commands/${file}`);
-  client.commands.set(command.data.name, command);
+    const cmd = require(`./commands/${file}`);
+    client.commands.set(cmd.data.name, cmd);
 }
 
-const ROL_TICKETS = '1433602012163080293';
+client.once('ready', async () => {
+    console.log(`Bot conectado como ${client.user.tag}`);
 
-client.on('interactionCreate', async (interaction) => {
-  // Ejecución de Slash Commands
-  if (interaction.isChatInputCommand()) {
-    const command = client.commands.get(interaction.commandName);
-    if (!command) return;
-    try {
-      await command.execute(interaction);
-    } catch (error) {
-      console.error(error);
-      await interaction.reply({ content: 'Error ejecutando el comando.', ephemeral: true });
+    // LÓGICA DEL PANEL AUTO-LIMPIABLE
+    const channel = client.channels.cache.get(CANAL_TICKETS_ID);
+    if (channel) {
+        // Buscar y borrar mensajes previos del bot para no spamear
+        const messages = await channel.messages.fetch({ limit: 50 });
+        const botMessages = messages.filter(m => m.author.id === client.user.id);
+        if (botMessages.size > 0) await channel.bulkDelete(botMessages).catch(() => null);
+
+        // Enviar nuevo panel
+        const embed = new EmbedBuilder()
+            .setTitle("📩 Centro de Reportes")
+            .setDescription("Haz clic en el botón de abajo para reportar a un usuario o filtrador.\n\n**Recuerda tener evidencia preparada.**")
+            .setColor("#ff0000");
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('btn_ticket')
+                .setLabel('Abrir Reporte')
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('⚠️')
+        );
+
+        await channel.send({ embeds: [embed], components: [row] });
     }
-  }
+});
 
-  // Lógica de Tickets (Botón)
-  if (interaction.isButton() && interaction.customId === 'abrir_ticket') {
-    const modal = new ModalBuilder()
-      .setCustomId('modal_reporte')
-      .setTitle('Reporte de Usuario / Filtra');
+client.on('interactionCreate', async i => {
+    if (i.isChatInputCommand()) {
+        const command = client.commands.get(i.commandName);
+        if (command) await command.execute(i);
+    }
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('target').setLabel("Usuario Reportado").setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('evidencia').setLabel("Evidencia (Texto)").setStyle(TextInputStyle.Paragraph).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('opcional').setLabel("Algo más (Opcional)").setStyle(TextInputStyle.Paragraph).setRequired(false))
-    );
-    return interaction.showModal(modal);
-  }
+    if (i.isButton() && i.customId === 'btn_ticket') {
+        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar Filtrador');
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('Usuario Reportado').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Evidencia (Texto)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Info Extra').setStyle(TextInputStyle.Paragraph).setRequired(false))
+        );
+        await i.showModal(modal);
+    }
 
-  // Lógica de Modal
-  if (interaction.isModalSubmit() && interaction.customId === 'modal_reporte') {
-    const target = interaction.fields.getTextInputValue('target');
-    const evidencia = interaction.fields.getTextInputValue('evidencia');
-    const opcional = interaction.fields.getTextInputValue('opcional') || "Ninguna";
+    if (i.isModalSubmit() && i.customId === 'mdl_reporte') {
+        const userRep = i.fields.getTextInputValue('u');
+        const txtEv = i.fields.getTextInputValue('e');
+        const extra = i.fields.getTextInputValue('o') || 'N/A';
 
-    const channel = await interaction.guild.channels.create({
-      name: `reporte-${interaction.user.username}`,
-      type: ChannelType.GuildText,
-      permissionOverwrites: [
-        { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
-        { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-      ]
-    });
+        const ch = await i.guild.channels.create({
+            name: `reporte-${i.user.username}`,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+                { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+            ]
+        });
 
-    const embed = new EmbedBuilder()
-      .setTitle("🛡️ Nuevo Reporte")
-      .setColor(0x2b2d31)
-      .addFields(
-        { name: "👤 Reportado", value: target, inline: true },
-        { name: "📝 Evidencia Texto", value: evidencia },
-        { name: "➕ Info Opcional", value: opcional }
-      );
+        const embed = new EmbedBuilder()
+            .setTitle("🛡️ Nuevo Ticket de Reporte")
+            .addFields(
+                { name: "👤 Reportado", value: userRep },
+                { name: "📄 Evidencia", value: txtEv },
+                { name: "➕ Extra", value: extra }
+            )
+            .setColor("Blue")
+            .setFooter({ text: "Sube tus imágenes/videos en este canal." });
 
-    await channel.send({ content: `<@${interaction.user.id}> <@&${ROL_TICKETS}>`, embeds: [embed] });
-    await interaction.reply({ content: `Ticket creado en ${channel}`, ephemeral: true });
-  }
+        await ch.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [embed] });
+        await i.reply({ content: `Ticket abierto: ${ch}`, ephemeral: true });
+    }
 });
 
 client.login(process.env.DISCORD_TOKEN);
