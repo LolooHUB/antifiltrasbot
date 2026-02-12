@@ -1,32 +1,17 @@
 const { 
-    Client, 
-    GatewayIntentBits, 
-    Collection, 
-    EmbedBuilder, 
-    ActionRowBuilder, 
-    ButtonBuilder, 
-    ButtonStyle, 
-    ModalBuilder, 
-    TextInputBuilder, 
-    TextInputStyle, 
-    ChannelType, 
-    PermissionFlagsBits 
+    Client, GatewayIntentBits, Collection, EmbedBuilder, ActionRowBuilder, 
+    ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
+    TextInputStyle, ChannelType, PermissionFlagsBits 
 } = require('discord.js');
 const { db } = require('./firebase');
 const fs = require('node:fs');
 
 const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent
-    ] 
+    intents: [3276799] // Todos los intents activos
 });
 
-// CONFIGURACIÓN DE IDs
 const ROL_TICKETS = '1433602012163080293';
-const CANAL_TICKETS_ID = '1412420238284423208'; // ID ACTUALIZADO
+const CANAL_TICKETS_ID = '1412420238284423208';
 
 client.commands = new Collection();
 const commandFiles = fs.readdirSync('./commands').filter(f => f.endsWith('.js'));
@@ -35,45 +20,29 @@ for (const file of commandFiles) {
     client.commands.set(cmd.data.name, cmd);
 }
 
-// --- PANEL DE TICKETS (READY) ---
 client.once('ready', async () => {
-    console.log(`✅ Bot online: ${client.user.tag}`);
-
+    console.log(`✅ ${client.user.tag} ONLINE`);
     const channel = client.channels.cache.get(CANAL_TICKETS_ID);
-    if (!channel) return console.error("❌ No encuentro el canal de tickets.");
+    if (!channel) return;
 
-    try {
-        // Limpiar mensajes previos del bot
-        const messages = await channel.messages.fetch({ limit: 50 }).catch(() => new Map());
-        const botMessages = messages.filter(m => m.author.id === client.user.id);
-        
-        if (botMessages.size > 0) {
-            await channel.bulkDelete(botMessages).catch(async () => {
-                for (const m of botMessages.values()) await m.delete().catch(() => null);
-            });
-        }
+    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => new Map());
+    const botMessages = messages.filter(m => m.author.id === client.user.id);
+    if (botMessages.size > 0) await channel.bulkDelete(botMessages).catch(() => null);
 
-        const embed = new EmbedBuilder()
-            .setTitle("📩 Reportar Usuario / Filtrador")
-            .setDescription("Si tienes pruebas de un usuario filtrador, abre un ticket con el botón de abajo.")
-            .setColor("#ff0000");
+    const embed = new EmbedBuilder()
+        .setTitle("🛡️ SISTEMA DE REPORTES ANTI-FILTRAS")
+        .setDescription("Presiona el botón de abajo para iniciar un reporte oficial.")
+        .addFields({ name: "⚠️ Aviso", value: "Debes tener pruebas claras para marcar a un filtrador." })
+        .setColor("#2b2d31")
+        .setThumbnail(client.user.displayAvatarURL());
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('btn_ticket')
-                .setLabel('Abrir Ticket')
-                .setStyle(ButtonStyle.Danger)
-                .setEmoji('⚠️')
-        );
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_ticket').setLabel('REPORTE').setStyle(ButtonStyle.Danger).setEmoji('⚠️')
+    );
 
-        await channel.send({ embeds: [embed], components: [row] });
-        console.log("✅ Panel enviado al canal corregido.");
-    } catch (err) {
-        console.error("❌ Error enviando panel:", err);
-    }
+    await channel.send({ embeds: [embed], components: [row] });
 });
 
-// --- INTERACCIONES ---
 client.on('interactionCreate', async (i) => {
     if (i.isChatInputCommand()) {
         const command = client.commands.get(i.commandName);
@@ -81,11 +50,11 @@ client.on('interactionCreate', async (i) => {
     }
 
     if (i.isButton() && i.customId === 'btn_ticket') {
-        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reporte');
+        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('SISTEMA DE REPORTES');
         modal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel("Usuario").setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel("Evidencia (Texto)").setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel("Opcional").setStyle(TextInputStyle.Paragraph).setRequired(false))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel("ID / USER REPORTADO").setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel("EVIDENCIA (TEXTO)").setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel("INFORMACIÓN OPCIONAL").setStyle(TextInputStyle.Paragraph).setRequired(false))
         );
         await i.showModal(modal);
     }
@@ -93,7 +62,7 @@ client.on('interactionCreate', async (i) => {
     if (i.isModalSubmit() && i.customId === 'mdl_reporte') {
         const target = i.fields.getTextInputValue('u');
         const ev = i.fields.getTextInputValue('e');
-        const opt = i.fields.getTextInputValue('o') || 'N/A';
+        const opt = i.fields.getTextInputValue('o') || 'Ninguna';
 
         const ticket = await i.guild.channels.create({
             name: `reporte-${i.user.username}`,
@@ -106,12 +75,17 @@ client.on('interactionCreate', async (i) => {
         });
 
         const emb = new EmbedBuilder()
-            .setTitle("🛡️ Nuevo Reporte")
-            .addFields({name: "Reportado", value: target}, {name: "Texto", value: ev}, {name: "Extra", value: opt})
-            .setColor("Blue");
+            .setAuthor({ name: "NUEVO REPORTE RECIBIDO", iconURL: i.user.displayAvatarURL() })
+            .setColor("#ff0000")
+            .addFields(
+                { name: "👤 Reportado", value: `\`${target}\``, inline: true },
+                { name: "📝 Texto Evidencia", value: `\`\`\`${ev}\`\`\`` },
+                { name: "ℹ️ Extra", value: opt }
+            )
+            .setFooter({ text: "Sube imágenes/videos para concluir el caso." });
 
         await ticket.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [emb] });
-        await i.reply({ content: `Ticket: ${ticket}`, ephemeral: true });
+        await i.reply({ content: `✅ Ticket: ${ticket}`, ephemeral: true });
     }
 });
 
