@@ -38,7 +38,7 @@ client.once('ready', async () => {
     console.log(`✅ Bot Online: ${client.user.tag}`);
     client.user.setActivity('Sistemas de Seguridad', { type: ActivityType.Watching });
 
-    // --- MONITOR DE SISTEMAS (EDICIÓN SILENCIOSA) ---
+    // --- MONITOR DE SISTEMAS (EDICIÓN ESTRICTA Y LIMPIEZA) ---
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
@@ -69,32 +69,40 @@ client.once('ready', async () => {
             .setFooter({ text: "Sincronización en tiempo real con la base de datos" })
             .setTimestamp();
 
-        const messages = await statusChannel.messages.fetch({ limit: 10 });
-        const lastStatusMsg = messages.filter(m => m.author.id === client.user.id && m.embeds[0]?.author?.name === "SISTEMA DE SEGURIDAD ANTI-FILTRAS").first();
-
-        if (lastStatusMsg) {
-            await lastStatusMsg.edit({ content: null, embeds: [statusEmbed] }).catch(() => null);
+        // --- LÓGICA DE MENSAJE ÚNICO (EVITA DUPLICADOS) ---
+        const messages = await statusChannel.messages.fetch({ limit: 20 });
+        const botMessages = messages.filter(m => m.author.id === client.user.id);
+        
+        // Si hay mensajes viejos o feos, los borramos todos para dejar la mesa limpia
+        if (botMessages.size > 1) {
+            await statusChannel.bulkDelete(botMessages).catch(() => null);
+            await statusChannel.send({ embeds: [statusEmbed] });
+        } else if (botMessages.size === 1) {
+            // Si hay exactamente uno, lo editamos
+            await botMessages.first().edit({ content: null, embeds: [statusEmbed] }).catch(() => null);
         } else {
+            // Si no hay ninguno, enviamos el primero
             await statusChannel.send({ embeds: [statusEmbed] });
         }
 
+        // --- PING MANUAL (SOLO CUANDO SE INDICA) ---
         if (data.forcePing && !isFirstLoad && data.forcePing !== lastPingTimestamp) {
             statusChannel.send({ content: `⚠️ **NOTIFICACIÓN:** Se han actualizado los sistemas. <@&${ROL_STAFF_PING}>` })
-                .then(m => setTimeout(() => m.delete(), 60000));
+                .then(m => setTimeout(() => m.delete(), 30000)); // Se borra en 30 seg para no molestar
             lastPingTimestamp = data.forcePing;
         }
         isFirstLoad = false;
     });
 
-    // --- PANEL DE TICKETS ---
-    const channel = client.channels.cache.get(CANAL_TICKETS_ID);
-    if (channel) {
-        const messages = await channel.messages.fetch({ limit: 5 });
-        const botMsgs = messages.filter(m => m.author.id === client.user.id);
-        if (botMsgs.size > 0) await channel.bulkDelete(botMsgs).catch(() => null);
+    // --- PANEL DE TICKETS (AUTO-LIMPIEZA) ---
+    const tChannel = client.channels.cache.get(CANAL_TICKETS_ID);
+    if (tChannel) {
+        const tMsgs = await tChannel.messages.fetch({ limit: 10 });
+        const oldBotMsgs = tMsgs.filter(m => m.author.id === client.user.id);
+        if (oldBotMsgs.size > 0) await tChannel.bulkDelete(oldBotMsgs).catch(() => null);
 
-        await channel.send({ 
-            embeds: [new EmbedBuilder().setTitle("📩 Centro de Reportes").setDescription("Presiona el botón para abrir un ticket.").setColor(0x2b2d31)], 
+        await tChannel.send({ 
+            embeds: [new EmbedBuilder().setTitle("📩 Centro de Reportes").setDescription("Presiona el botón para abrir un ticket de reporte.").setColor(0x2b2d31)], 
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_ticket').setLabel('Reportar').setStyle(ButtonStyle.Danger).setEmoji('🛡️'))] 
         });
     }
@@ -108,14 +116,14 @@ client.on('interactionCreate', async i => {
 
     if (i.isButton() && i.customId === 'btn_ticket') {
         const s = client.configGlobal.ticketsEnabled;
-        if (s === 0) return i.reply({ content: "❌ Cerrado.", ephemeral: true });
-        if (s === 2) return i.reply({ content: "🟡 Mantenimiento.", ephemeral: true });
+        if (s === 0) return i.reply({ content: "❌ El sistema de tickets está desactivado.", ephemeral: true });
+        if (s === 2) return i.reply({ content: "🟡 El sistema está en mantenimiento.", ephemeral: true });
 
-        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar');
+        const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar Usuario');
         modal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('ID Usuario').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('ID del Usuario').setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas (Link)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Extra').setStyle(TextInputStyle.Paragraph).setRequired(false))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Información Extra').setStyle(TextInputStyle.Paragraph).setRequired(false))
         );
         await i.showModal(modal);
     }
@@ -131,8 +139,8 @@ client.on('interactionCreate', async i => {
                 { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
         });
-        await ch.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [new EmbedBuilder().setTitle("Nuevo Reporte").addFields({name:"User",value:u},{name:"Ev",value:e},{name:"Extra",value:o}).setColor(0x2b2d31)] });
-        await i.reply({ content: `✅ Ticket: ${ch}`, ephemeral: true });
+        await ch.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [new EmbedBuilder().setTitle("Nuevo Reporte").addFields({name:"Usuario",value:u},{name:"Evidencia",value:e},{name:"Detalles",value:o}).setColor(0x2b2d31).setTimestamp()] });
+        await i.reply({ content: `✅ Ticket creado correctamente: ${ch}`, ephemeral: true });
     }
 });
 
