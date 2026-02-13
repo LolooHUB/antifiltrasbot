@@ -32,13 +32,13 @@ for (const file of commandFiles) {
 }
 
 let lastPingTimestamp = null;
-let isFirstLoad = true; 
+let isFirstLoad = true;
 
 client.once('ready', async () => {
     console.log(`✅ Bot Online: ${client.user.tag}`);
     client.user.setActivity('Sistemas de Seguridad', { type: ActivityType.Watching });
 
-    // --- LISTENER DE FIREBASE (DISEÑO DE IMAGEN + PING MANUAL) ---
+    // --- MONITOR DE SISTEMAS (EDICIÓN SILENCIOSA) ---
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
@@ -48,35 +48,29 @@ client.once('ready', async () => {
         if (!statusChannel) return;
 
         const getStatusStyle = (v) => {
-            if (v === 1) return "🟢 **`OPERATIVO`**";
-            if (v === 2) return "🟡 **`MANTENIMIENTO`**";
-            return "🔴 **`DESACTIVADO`**";
+            if (v === 1) return "🟢 **` OPERATIVO `**";
+            if (v === 2) return "🟡 **` MANTENIMIENTO `**";
+            return "🔴 **` DESACTIVADO `**";
         };
 
         const embedColor = data.webEnabled === 1 ? 0x2b2d31 : (data.webEnabled === 2 ? 0xFFCC00 : 0xFF3E3E);
 
-        const description = [
-            "### Estado actual del bot y sus respectivos sistemas :\n",
-            "🌐 **PÁGINA WEB :**",
-            `${getStatusStyle(data.webEnabled)}\n`,
-            "📩 **TICKETS :**",
-            `${getStatusStyle(data.ticketsEnabled)}\n`,
-            "⚙️ **CONFIGURACIÓN :**",
-            `${getStatusStyle(data.configEnabled)}\n`,
-            "🚫 **BANEOS GLOBALES :**",
-            `${getStatusStyle(data.bansEnabled)}`
-        ].join('\n');
-
         const statusEmbed = new EmbedBuilder()
-            .setAuthor({ name: "ANTI-FILTRAS MONITOR", iconURL: client.user.displayAvatarURL() })
-            .setDescription(description)
+            .setAuthor({ name: "SISTEMA DE SEGURIDAD ANTI-FILTRAS", iconURL: client.user.displayAvatarURL() })
+            .setDescription(
+                "### Estado actual del bot y sus respectivos sistemas :\n\n" +
+                "🌐 **PÁGINA WEB :**\n" + `${getStatusStyle(data.webEnabled)}\n\n` +
+                "📩 **TICKETS :**\n" + `${getStatusStyle(data.ticketsEnabled)}\n\n` +
+                "⚙️ **CONFIGURACIÓN :**\n" + `${getStatusStyle(data.configEnabled)}\n\n` +
+                "🚫 **BANEOS GLOBALES :**\n" + `${getStatusStyle(data.bansEnabled)}`
+            )
             .setColor(embedColor)
+            .setThumbnail(client.user.displayAvatarURL())
             .setFooter({ text: "Sincronización en tiempo real con la base de datos" })
             .setTimestamp();
 
-        // 1. EDICIÓN SILENCIOSA
         const messages = await statusChannel.messages.fetch({ limit: 10 });
-        const lastStatusMsg = messages.filter(m => m.author.id === client.user.id && m.embeds[0]?.author?.name === "ANTI-FILTRAS MONITOR").first();
+        const lastStatusMsg = messages.filter(m => m.author.id === client.user.id && m.embeds[0]?.author?.name === "SISTEMA DE SEGURIDAD ANTI-FILTRAS").first();
 
         if (lastStatusMsg) {
             await lastStatusMsg.edit({ content: null, embeds: [statusEmbed] }).catch(() => null);
@@ -84,32 +78,24 @@ client.once('ready', async () => {
             await statusChannel.send({ embeds: [statusEmbed] });
         }
 
-        // 2. LÓGICA DE PING MANUAL
-        if (data.forcePing) {
-            if (!isFirstLoad && data.forcePing !== lastPingTimestamp) {
-                statusChannel.send({ 
-                    content: `⚠️ **ATENCIÓN STAFF:** Se han realizado cambios manuales en los sistemas. <@&${ROL_STAFF_PING}>`,
-                }).then(m => setTimeout(() => m.delete(), 60000));
-            }
+        if (data.forcePing && !isFirstLoad && data.forcePing !== lastPingTimestamp) {
+            statusChannel.send({ content: `⚠️ **NOTIFICACIÓN:** Se han actualizado los sistemas. <@&${ROL_STAFF_PING}>` })
+                .then(m => setTimeout(() => m.delete(), 60000));
             lastPingTimestamp = data.forcePing;
         }
         isFirstLoad = false;
     });
 
-    // --- PANEL DE TICKETS (AUTO-LIMPIEZA) ---
+    // --- PANEL DE TICKETS ---
     const channel = client.channels.cache.get(CANAL_TICKETS_ID);
     if (channel) {
         const messages = await channel.messages.fetch({ limit: 5 });
         const botMsgs = messages.filter(m => m.author.id === client.user.id);
         if (botMsgs.size > 0) await channel.bulkDelete(botMsgs).catch(() => null);
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('btn_ticket').setLabel('Reportar').setStyle(ButtonStyle.Danger).setEmoji('🛡️')
-        );
-
         await channel.send({ 
-            embeds: [new EmbedBuilder().setTitle("📩 Centro de Reportes").setDescription("Presiona el botón para reportar.").setColor(0x2b2d31)], 
-            components: [row] 
+            embeds: [new EmbedBuilder().setTitle("📩 Centro de Reportes").setDescription("Presiona el botón para abrir un ticket.").setColor(0x2b2d31)], 
+            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_ticket').setLabel('Reportar').setStyle(ButtonStyle.Danger).setEmoji('🛡️'))] 
         });
     }
 });
@@ -122,13 +108,13 @@ client.on('interactionCreate', async i => {
 
     if (i.isButton() && i.customId === 'btn_ticket') {
         const s = client.configGlobal.ticketsEnabled;
-        if (s === 0) return i.reply({ content: "❌ Sistema Cerrado.", ephemeral: true });
-        if (s === 2) return i.reply({ content: "🟡 Sistema en Mantenimiento.", ephemeral: true });
+        if (s === 0) return i.reply({ content: "❌ Cerrado.", ephemeral: true });
+        if (s === 2) return i.reply({ content: "🟡 Mantenimiento.", ephemeral: true });
 
         const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar');
         modal.addComponents(
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('ID Usuario').setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Evidencia').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas (Link)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Extra').setStyle(TextInputStyle.Paragraph).setRequired(false))
         );
         await i.showModal(modal);
@@ -137,7 +123,7 @@ client.on('interactionCreate', async i => {
     if (i.isModalSubmit() && i.customId === 'mdl_reporte') {
         const u = i.fields.getTextInputValue('u'), e = i.fields.getTextInputValue('e'), o = i.fields.getTextInputValue('o') || 'N/A';
         const ch = await i.guild.channels.create({
-            name: `🎫-reporte-${i.user.username}`,
+            name: `🎫-${i.user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -145,7 +131,7 @@ client.on('interactionCreate', async i => {
                 { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
         });
-        await ch.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [new EmbedBuilder().setTitle("Nuevo Reporte").addFields({name:"User",value:u},{name:"Ev",value:e},{name:"Extra",value:o}).setColor("Blue")] });
+        await ch.send({ content: `<@${i.user.id}> <@&${ROL_TICKETS}>`, embeds: [new EmbedBuilder().setTitle("Nuevo Reporte").addFields({name:"User",value:u},{name:"Ev",value:e},{name:"Extra",value:o}).setColor(0x2b2d31)] });
         await i.reply({ content: `✅ Ticket: ${ch}`, ephemeral: true });
     }
 });
