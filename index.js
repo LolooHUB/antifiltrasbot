@@ -13,31 +13,28 @@ const {
     ActivityType 
 } = require('discord.js');
 const { db } = require('./firebase');
-const fs = require('node:fs');
 
 const client = new Client({ intents: [3276799] });
 client.configGlobal = { webEnabled: 1, ticketsEnabled: 1, bansEnabled: 1, configEnabled: 1 };
 
 // --- CONFIGURACIÓN DE IDs ---
 const ROL_TICKETS = '1433603806003990560';
-const ROL_STAFF_PING = '1433602018957594717';
 const CANAL_TICKETS_ID = '1433599187324502016';
 const CANAL_BUGS_ID = '1471992338057527437';
 const CANAL_STATUS_WEB = '1471651769565315072';
-
-let lastPingTimestamp = null;
-let isFirstLoad = true;
+const CANAL_TRANSCRIPTS = '1433599228479148082'; 
 
 client.once('ready', async () => {
-    console.log(`✅ Anti-Filtras Pro Online: ${client.user.tag}`);
+    console.log(`✅ Anti-Filtras Pro: ${client.user.tag}`);
     client.user.setActivity('ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ', { type: ActivityType.Watching });
 
-    // --- MONITOR DE FIREBASE Y BLOQUEO DINÁMICO ---
+    // --- MONITOR FIREBASE (ESTADO CON BORRADO Y RE-ENVÍO) ---
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
-
+        
         const guild = client.guilds.cache.first();
+        
         if (data.ticketsEnabled === 0 && client.configGlobal.ticketsEnabled !== 0) {
             const openTickets = guild.channels.cache.filter(c => (c.name.startsWith('🎫-') || c.name.startsWith('🐛-')) && c.type === ChannelType.GuildText);
             for (const [id, chan] of openTickets) {
@@ -48,75 +45,72 @@ client.once('ready', async () => {
                     }
                 });
                 const pauseEmb = new EmbedBuilder()
-                    .setTitle("⚠️ SISTEMA EN PAUSA")
-                    .setDescription(`\u200B\n> **ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ**\n\nEl sistema de soporte se encuentra en mantenimiento. El chat ha sido **bloqueado**. Volveremos a la normalidad en breve.\n\u200B`)
+                    .setTitle("✨ Pausa Técnica")
+                    .setDescription(`\u200B\nHola. Estamos realizando unas mejoras en nuestro sistema de soporte. Por ahora, el chat ha sido pausado. ¡Volveremos muy pronto!\n\u200B`)
                     .setColor(0xff3e3e);
                 await chan.send({ embeds: [pauseEmb] }).catch(() => null);
             }
-        } else if (data.ticketsEnabled === 1 && client.configGlobal.ticketsEnabled === 0) {
-            const openTickets = guild.channels.cache.filter(c => (c.name.startsWith('🎫-') || c.name.startsWith('🐛-')) && c.type === ChannelType.GuildText);
-            for (const [id, chan] of openTickets) {
-                await chan.permissionOverwrites.edit(ROL_TICKETS, { SendMessages: true }).catch(() => null);
-                chan.permissionOverwrites.cache.forEach(async (ov) => {
-                    if (ov.id !== ROL_TICKETS && ov.id !== client.user.id && ov.id !== guild.id) {
-                        await chan.permissionOverwrites.edit(ov.id, { SendMessages: true }).catch(() => null);
-                    }
-                });
-                await chan.send({ content: "✅ **Sistema restablecido.** Ya pueden continuar." }).catch(() => null);
-            }
         }
-
         client.configGlobal = data;
 
-        // --- MONITOR DE STATUS (CANAL STATUS) ---
         const statusChannel = await client.channels.fetch(CANAL_STATUS_WEB).catch(() => null);
         if (statusChannel) {
+            const msgs = await statusChannel.messages.fetch({ limit: 10 });
+            const botMsgs = msgs.filter(m => m.author.id === client.user.id);
+            if (botMsgs.size > 0) await statusChannel.bulkDelete(botMsgs).catch(() => null);
+
             const getStatus = (v) => v === 1 ? "🟢 ` OPERATIVO `" : (v === 2 ? "🟡 ` MANTENIMIENTO `" : "🔴 ` DESACTIVADO `");
             const statusEmbed = new EmbedBuilder()
-                .setAuthor({ name: "MONITOR DE SISTEMAS GLOBAL", iconURL: client.user.displayAvatarURL() })
-                .setDescription(`### Estado de Infraestructura :\n\n🌐 **WEB:** ${getStatus(data.webEnabled)}\n📩 **TICKETS:** ${getStatus(data.ticketsEnabled)}\n⚙️ **CONFIG:** ${getStatus(data.configEnabled)}\n🚫 **BANS:** ${getStatus(data.bansEnabled)}\n\n\u200B`)
-                .setColor(data.webEnabled === 1 ? 0x2b2d31 : 0xff3e3e).setTimestamp();
+                .setAuthor({ name: "Monitor de Sistemas", iconURL: client.user.displayAvatarURL() })
+                .setDescription(`### Estado de la Infraestructura :\n\n🌐 **PÁGINA WEB:** ${getStatus(data.webEnabled)}\n📩 **SOPORTE:** ${getStatus(data.ticketsEnabled)}\n\n\u200B`)
+                .setColor(data.webEnabled === 1 ? 0x2b2d31 : 0xff3e3e)
+                .setFooter({ text: "Sincronizado en tiempo real" }).setTimestamp();
             
-            const msgs = await statusChannel.messages.fetch({ limit: 10 });
-            const botMsg = msgs.filter(m => m.author.id === client.user.id).first();
-            if (botMsg) await botMsg.edit({ embeds: [statusEmbed] }); else await statusChannel.send({ embeds: [statusEmbed] });
+            await statusChannel.send({ embeds: [statusEmbed] });
         }
     });
 
-    // --- SETUP DE PANELES (CANAL TICKETS/BUGS) ---
-    const setupPanel = async (cid, title, desc, bid, bl, em) => {
-        const chan = client.channels.cache.get(cid); if (!chan) return;
-        const ms = await chan.messages.fetch({ limit: 10 });
-        await chan.bulkDelete(ms.filter(m => m.author.id === client.user.id)).catch(() => null);
-        const emb = new EmbedBuilder()
-            .setAuthor({ name: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ", iconURL: client.user.displayAvatarURL() })
-            .setTitle(title).setDescription(`\u200B\n${desc}\n\u200B`).setColor(0x2b2d31)
-            .setFooter({ text: "Seguridad y Regulación Global", iconURL: "https://i.imgur.com/vHq4MOn.png" });
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(bid).setLabel(bl).setStyle(ButtonStyle.Secondary).setEmoji(em));
-        await chan.send({ embeds: [emb], components: [row] });
+    const renderPanel = async (id, tit, desc, bid, lab, em) => {
+        const c = await client.channels.fetch(id).catch(() => null);
+        if (!c) return;
+        const ms = await c.messages.fetch({ limit: 10 });
+        await c.bulkDelete(ms.filter(m => m.author.id === client.user.id)).catch(() => null);
+        const emb = new EmbedBuilder().setAuthor({ name: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ" }).setTitle(tit).setDescription(`\u200B\n${desc}\n\u200B`).setColor(0x2b2d31);
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(bid).setLabel(lab).setStyle(ButtonStyle.Secondary).setEmoji(em));
+        await c.send({ embeds: [emb], components: [row] });
     };
 
-    await setupPanel(CANAL_TICKETS_ID, "🛡️ REPORTE DE FILTRACIÓN", "### ¿Deseas reportar a un Filtra?\nPresiona el botón para abrir un expediente. Asegúrate de tener las pruebas listas.", "btn_ticket", "Abrir Reporte", "🛡️");
-    await setupPanel(CANAL_BUGS_ID, "⚙️ REPORTE DE ERRORES", "### ¿Encontraste un fallo?\nReporta cualquier error técnico en el bot o la plataforma web.", "btn_bug", "Enviar Bug", "⚙️");
+    await renderPanel(CANAL_TICKETS_ID, "🛡️ Reportar Filtración", "### ¡Ayúdanos a proteger la comunidad!\nSi has visto contenido filtrado o ventas ilegales, cuéntanos aquí abajo.", "btn_ticket", "Abrir Reporte", "🛡️");
+    await renderPanel(CANAL_BUGS_ID, "⚙️ Reporte de Errores", "### ¿Algo no funciona bien?\nInforma cualquier fallo técnico para que nuestro equipo pueda arreglarlo.", "btn_bug", "Enviar Bug", "⚙️");
 });
 
 client.on('interactionCreate', async i => {
-    if (i.isButton()) {
-        if (i.customId === 'close_ticket') return i.channel.delete();
-        if (client.configGlobal.ticketsEnabled === 0) return i.reply({ content: "❌ Sistema apagado.", ephemeral: true });
+    if (i.isButton() && i.customId === 'close_ticket') {
+        const logChan = await client.channels.fetch(CANAL_TRANSCRIPTS).catch(() => null);
+        const msgs = await i.channel.messages.fetch();
+        let transcript = `REGISTRO DE TICKET: ${i.channel.name}\n\n`;
+        msgs.reverse().forEach(m => { transcript += `[${m.createdAt.toLocaleString()}] ${m.author.tag}: ${m.content}\n`; });
 
-        const modal = new ModalBuilder().setCustomId(i.customId === 'btn_ticket' ? 'mdl_reporte' : 'mdl_bug').setTitle(i.customId === 'btn_ticket' ? 'Formulario de Reporte' : 'Reportar Bug');
-        
+        if (logChan) {
+            const file = Buffer.from(transcript, 'utf-8');
+            await logChan.send({ content: `📂 Historial de conversación: **${i.channel.name}**`, files: [{ attachment: file, name: `${i.channel.name}.txt` }] });
+        }
+        return i.channel.delete();
+    }
+
+    if (i.isButton()) {
+        if (client.configGlobal.ticketsEnabled === 0) return i.reply({ content: "❌ El sistema está en mantenimiento. Por favor, inténtalo más tarde.", ephemeral: true });
+        const modal = new ModalBuilder().setCustomId(i.customId === 'btn_ticket' ? 'mdl_reporte' : 'mdl_bug').setTitle('Formulario de Ayuda');
         if (i.customId === 'btn_ticket') {
             modal.addComponents(
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('ID del Infractor').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas (Links)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Información Adicional').setStyle(TextInputStyle.Paragraph).setRequired(false))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas o Links').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('¿Quieres añadir algo más?').setStyle(TextInputStyle.Paragraph).setRequired(false))
             );
         } else {
             modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bt').setLabel('Sistema Afectado').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bd').setLabel('Descripción del Fallo').setStyle(TextInputStyle.Paragraph).setRequired(true))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bt').setLabel('¿Dónde ocurre el fallo?').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bd').setLabel('Cuéntanos qué pasó').setStyle(TextInputStyle.Paragraph).setRequired(true))
             );
         }
         await i.showModal(modal);
@@ -124,6 +118,7 @@ client.on('interactionCreate', async i => {
 
     if (i.isModalSubmit()) {
         const isBug = i.customId === 'mdl_bug';
+        await i.deferReply({ ephemeral: true });
         const ch = await i.guild.channels.create({
             name: `${isBug ? '🐛-bug' : '🎫-reporte'}-${i.user.username}`,
             type: ChannelType.GuildText,
@@ -134,49 +129,41 @@ client.on('interactionCreate', async i => {
             ]
         });
 
-        // 1. EMBED DE BIENVENIDA (MODERNO)
-        const welcomeEmb = new EmbedBuilder()
-            .setTitle(`BIENVENIDO AL SOPORTE`)
+        // --- MENSAJE DE BIENVENIDA AMIGABLE ---
+        const welcome = new EmbedBuilder()
+            .setTitle(`¡Hola! Ya estamos aquí para ayudarte ✨`)
             .setDescription(
-                `Hola <@${i.user.id}>, gracias por contactar con **ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ**.\n\n` +
-                `### 📌 Instrucciones:\n` +
-                `> Por favor, bríndanos **capturas de pantalla, videos o archivos** adicionales que refuercen tu reporte.\n\n` +
-                `Un miembro de nuestro equipo <@&${ROL_TICKETS}> revisará la información en breve. Mantente atento a este canal.`
+                `Bienvenido <@${i.user.id}> a tu canal de atención personalizada.\n\n` +
+                `### 📸 ¿Nos podrías enviar las pruebas?\n` +
+                `> Para poder ayudarte mejor, por favor **envía capturas de pantalla o videos** que muestren lo ocurrido.\n\n` +
+                `Nuestro equipo de <@&${ROL_TICKETS}> revisará tu información lo antes posible. ¡Gracias por tu paciencia!`
             )
             .setColor(0x2b2d31)
             .setThumbnail(i.user.displayAvatarURL());
 
-        // 2. EMBED DE INFORMACIÓN TÉCNICA (MODERNO)
-        const infoEmb = new EmbedBuilder()
-            .setAuthor({ name: `REMITENTE: ${i.user.tag.toUpperCase()}`, iconURL: i.user.displayAvatarURL() })
-            .setTitle(isBug ? "🛠️ DATOS DEL INFORME TÉCNICO" : "📂 EXPEDIENTE DE SEGURIDAD")
+        const info = new EmbedBuilder()
+            .setTitle(isBug ? "⚙️ Información del Bug" : "📄 Detalles del Reporte")
             .setColor(isBug ? 0xFFAA00 : 0x2b2d31)
-            .setDescription(`\u200B\n**Sincronización de Base de Datos:**\n> *Estado: Pendiente de Revisión*\n\u200B`);
+            .setFooter({ text: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ" });
 
         if (isBug) {
-            infoEmb.addFields(
-                { name: "💻 SISTEMA", value: `\`\`\`${i.fields.getTextInputValue('bt')}\`\`\``, inline: true },
-                { name: "🔍 ESTADO", value: `\`🟠 Bug Report\``, inline: true },
-                { name: "📖 DESCRIPCIÓN", value: i.fields.getTextInputValue('bd') }
+            info.addFields(
+                { name: "📍 Ubicación", value: `\`\`\`${i.fields.getTextInputValue('bt')}\`\`\``, inline: true },
+                { name: "📝 Descripción", value: i.fields.getTextInputValue('bd') }
             );
         } else {
-            infoEmb.addFields(
-                { name: "👤 INFRACTOR (ID)", value: `\`\`\`${i.fields.getTextInputValue('u')}\`\`\``, inline: true },
-                { name: "⚖️ CATEGORÍA", value: `\`🛡️ Filtra\``, inline: true },
-                { name: "🔗 PRUEBAS", value: i.fields.getTextInputValue('e') },
-                { name: "📝 DETALLES", value: `\`\`\`${i.fields.getTextInputValue('o') || 'No se proporcionaron detalles adicionales.'}\`\`\`` }
+            info.addFields(
+                { name: "👤 Usuario Reportado", value: `\`\`\`${i.fields.getTextInputValue('u')}\`\`\``, inline: true },
+                { name: "🔗 Enlaces compartidos", value: i.fields.getTextInputValue('e') },
+                { name: "💬 Nota adicional", value: `\`\`\`${i.fields.getTextInputValue('o') || 'Sin comentarios adicionales.'}\`\`\`` }
             );
         }
 
-        infoEmb.setFooter({ text: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ • Gestión Interna", iconURL: client.user.displayAvatarURL() }).setTimestamp();
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
-        );
-
-        await ch.send({ content: `<@${i.user.id}> | <@&${ROL_TICKETS}>`, embeds: [welcomeEmb, infoEmb], components: [row] });
-        await i.reply({ content: `✅ **Ticket abierto correctamente:** ${ch}`, ephemeral: true });
+        const btn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Finalizar Atención').setStyle(ButtonStyle.Danger).setEmoji('🔒'));
+        
+        await ch.send({ content: `Hola <@${i.user.id}>, el equipo de <@&${ROL_TICKETS}> ha sido notificado.`, embeds: [welcome, info], components: [btn] });
+        await i.editReply({ content: `✨ ¡Listo! Tu canal ha sido creado con éxito: ${ch}` });
     }
 });
 
-client.login("TOKEN_AQUÍ");
+client.login(process.env.BOT_TOKEN);
