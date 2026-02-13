@@ -16,161 +16,116 @@ const { db } = require('./firebase');
 const fs = require('node:fs');
 
 const client = new Client({ intents: [3276799] });
-client.commands = new Collection();
 client.configGlobal = { webEnabled: 1, ticketsEnabled: 1, bansEnabled: 1, configEnabled: 1 };
 
-// IDs de Configuración
+// --- CONFIGURACIÓN DE IDs ---
 const ROL_TICKETS = '1433603806003990560';
 const ROL_STAFF_PING = '1433602018957594717';
 const CANAL_TICKETS_ID = '1433599187324502016';
 const CANAL_BUGS_ID = '1471992338057527437';
 const CANAL_STATUS_WEB = '1471651769565315072';
 
-// Carga de Comandos
-const commandFiles = fs.readdirSync('./commands').filter(f => f.endsWith('.js'));
-for (const file of commandFiles) {
-    const cmd = require(`./commands/${file}`);
-    client.commands.set(cmd.data.name, cmd);
-}
-
 let lastPingTimestamp = null;
 let isFirstLoad = true;
 
 client.once('ready', async () => {
-    console.log(`✅ Anti-Filtras Online: ${client.user.tag}`);
+    console.log(`✅ Anti-Filtras Pro Online: ${client.user.tag}`);
     client.user.setActivity('ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ', { type: ActivityType.Watching });
 
-    // --- MONITOR DE SISTEMAS Y BLOQUEO DINÁMICO ---
+    // --- MONITOR DE FIREBASE Y BLOQUEO DINÁMICO ---
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
 
-        // Lógica de Bloqueo de Tickets si el sistema se apaga
+        const guild = client.guilds.cache.first();
         if (data.ticketsEnabled === 0 && client.configGlobal.ticketsEnabled !== 0) {
-            const guild = client.guilds.cache.first();
-            const openTickets = guild.channels.cache.filter(c => c.name.startsWith('🎫-') || c.name.startsWith('🐛-'));
-            openTickets.forEach(async (chan) => {
-                await chan.permissionOverwrites.edit(ROL_TICKETS, { SendMessages: false });
+            const openTickets = guild.channels.cache.filter(c => (c.name.startsWith('🎫-') || c.name.startsWith('🐛-')) && c.type === ChannelType.GuildText);
+            for (const [id, chan] of openTickets) {
+                await chan.permissionOverwrites.edit(ROL_TICKETS, { SendMessages: false }).catch(() => null);
+                chan.permissionOverwrites.cache.forEach(async (ov) => {
+                    if (ov.id !== ROL_TICKETS && ov.id !== client.user.id && ov.id !== guild.id) {
+                        await chan.permissionOverwrites.edit(ov.id, { SendMessages: false }).catch(() => null);
+                    }
+                });
                 const pauseEmb = new EmbedBuilder()
                     .setTitle("⚠️ SISTEMA EN PAUSA")
-                    .setDescription("> Nos encontramos realizando ajustes técnicos en ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ.\n\nEl chat ha sido **desactivado**. No podremos continuar con tu reporte hasta que el sistema vuelva a marcarse como `OPERATIVO` en el monitor principal.")
+                    .setDescription(`\u200B\n> **ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ**\n\nEl sistema de soporte se encuentra en mantenimiento. El chat ha sido **bloqueado**. Volveremos a la normalidad en breve.\n\u200B`)
                     .setColor(0xff3e3e);
-                await chan.send({ embeds: [pauseEmb] });
-            });
+                await chan.send({ embeds: [pauseEmb] }).catch(() => null);
+            }
+        } else if (data.ticketsEnabled === 1 && client.configGlobal.ticketsEnabled === 0) {
+            const openTickets = guild.channels.cache.filter(c => (c.name.startsWith('🎫-') || c.name.startsWith('🐛-')) && c.type === ChannelType.GuildText);
+            for (const [id, chan] of openTickets) {
+                await chan.permissionOverwrites.edit(ROL_TICKETS, { SendMessages: true }).catch(() => null);
+                chan.permissionOverwrites.cache.forEach(async (ov) => {
+                    if (ov.id !== ROL_TICKETS && ov.id !== client.user.id && ov.id !== guild.id) {
+                        await chan.permissionOverwrites.edit(ov.id, { SendMessages: true }).catch(() => null);
+                    }
+                });
+                await chan.send({ content: "✅ **Sistema restablecido.** Ya pueden continuar." }).catch(() => null);
+            }
         }
 
         client.configGlobal = data;
+
+        // --- MONITOR DE STATUS (CANAL STATUS) ---
         const statusChannel = await client.channels.fetch(CANAL_STATUS_WEB).catch(() => null);
-        if (!statusChannel) return;
-
-        const getStatusStyle = (v) => {
-            if (v === 1) return "🟢 **` OPERATIVO `**";
-            if (v === 2) return "🟡 **` MANTENIMIENTO `**";
-            return "🔴 **` DESACTIVADO `**";
-        };
-
-        const embedColor = data.webEnabled === 1 ? 0x2b2d31 : (data.webEnabled === 2 ? 0xFFCC00 : 0xFF3E3E);
-
-        const statusEmbed = new EmbedBuilder()
-            .setAuthor({ name: "SISTEMA DE SEGURIDAD ANTI-FILTRAS", iconURL: client.user.displayAvatarURL() })
-            .setDescription(
-                "### Estado actual del bot y sus respectivos sistemas :\n\n" +
-                "🌐 **PÁGINA WEB :**\n" + `${getStatusStyle(data.webEnabled)}\n\n` +
-                "📩 **TICKETS :**\n" + `${getStatusStyle(data.ticketsEnabled)}\n\n` +
-                "⚙️ **CONFIGURACIÓN :**\n" + `${getStatusStyle(data.configEnabled)}\n\n` +
-                "🚫 **BANEOS GLOBALES :**\n" + `${getStatusStyle(data.bansEnabled)}`
-            )
-            .setColor(embedColor)
-            .setThumbnail(client.user.displayAvatarURL())
-            .setFooter({ text: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ • Seguridad Global" })
-            .setTimestamp();
-
-        // Limpieza y Edición Silenciosa
-        const messages = await statusChannel.messages.fetch({ limit: 10 });
-        const botMessages = messages.filter(m => m.author.id === client.user.id);
-        if (botMessages.size > 1) {
-            await statusChannel.bulkDelete(botMessages).catch(() => null);
-            await statusChannel.send({ embeds: [statusEmbed] });
-        } else if (botMessages.size === 1) {
-            await botMessages.first().edit({ content: null, embeds: [statusEmbed] }).catch(() => null);
-        } else {
-            await statusChannel.send({ embeds: [statusEmbed] });
+        if (statusChannel) {
+            const getStatus = (v) => v === 1 ? "🟢 ` OPERATIVO `" : (v === 2 ? "🟡 ` MANTENIMIENTO `" : "🔴 ` DESACTIVADO `");
+            const statusEmbed = new EmbedBuilder()
+                .setAuthor({ name: "MONITOR DE SISTEMAS GLOBAL", iconURL: client.user.displayAvatarURL() })
+                .setDescription(`### Estado de Infraestructura :\n\n🌐 **WEB:** ${getStatus(data.webEnabled)}\n📩 **TICKETS:** ${getStatus(data.ticketsEnabled)}\n⚙️ **CONFIG:** ${getStatus(data.configEnabled)}\n🚫 **BANS:** ${getStatus(data.bansEnabled)}\n\n\u200B`)
+                .setColor(data.webEnabled === 1 ? 0x2b2d31 : 0xff3e3e).setTimestamp();
+            
+            const msgs = await statusChannel.messages.fetch({ limit: 10 });
+            const botMsg = msgs.filter(m => m.author.id === client.user.id).first();
+            if (botMsg) await botMsg.edit({ embeds: [statusEmbed] }); else await statusChannel.send({ embeds: [statusEmbed] });
         }
-
-        // Ping Manual
-        if (data.forcePing && !isFirstLoad && data.forcePing !== lastPingTimestamp) {
-            statusChannel.send({ content: `⚠️ **NOTIFICACIÓN STAFF:** Actualización de sistemas manual. <@&${ROL_STAFF_PING}>` })
-                .then(m => setTimeout(() => m.delete(), 30000));
-            lastPingTimestamp = data.forcePing;
-        }
-        isFirstLoad = false;
     });
 
-    // --- PANELES DE INICIO ---
-    const setup = async (cid, t, d, bid, bl, em) => {
-        const c = client.channels.cache.get(cid); if (!c) return;
-        const ms = await c.messages.fetch({ limit: 5 });
-        const bms = ms.filter(m => m.author.id === client.user.id);
-        if (bms.size > 0) await c.bulkDelete(bms).catch(() => null);
-        await c.send({ 
-            embeds: [new EmbedBuilder().setTitle(t).setDescription(d).setColor(0x2b2d31)],
-            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(bid).setLabel(bl).setStyle(ButtonStyle.Secondary).setEmoji(em))]
-        });
+    // --- SETUP DE PANELES (CANAL TICKETS/BUGS) ---
+    const setupPanel = async (cid, title, desc, bid, bl, em) => {
+        const chan = client.channels.cache.get(cid); if (!chan) return;
+        const ms = await chan.messages.fetch({ limit: 10 });
+        await chan.bulkDelete(ms.filter(m => m.author.id === client.user.id)).catch(() => null);
+        const emb = new EmbedBuilder()
+            .setAuthor({ name: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ", iconURL: client.user.displayAvatarURL() })
+            .setTitle(title).setDescription(`\u200B\n${desc}\n\u200B`).setColor(0x2b2d31)
+            .setFooter({ text: "Seguridad y Regulación Global", iconURL: "https://i.imgur.com/vHq4MOn.png" });
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(bid).setLabel(bl).setStyle(ButtonStyle.Secondary).setEmoji(em));
+        await chan.send({ embeds: [emb], components: [row] });
     };
-    await setup(CANAL_TICKETS_ID, "🛡️ Reportar a un Filtra", "Si alguien está vendiendo o distribuyendo modelos sin permiso, repórtalo aquí.", "btn_ticket", "Reportar Usuario", "🛡️");
-    await setup(CANAL_BUGS_ID, "🐛 Reportar un Error", "Si el bot o la web fallan, infórmalo a los desarrolladores.", "btn_bug", "Reportar Bug", "⚙️");
+
+    await setupPanel(CANAL_TICKETS_ID, "🛡️ REPORTE DE FILTRACIÓN", "### ¿Deseas reportar a un Filtra?\nPresiona el botón para abrir un expediente. Asegúrate de tener las pruebas listas.", "btn_ticket", "Abrir Reporte", "🛡️");
+    await setupPanel(CANAL_BUGS_ID, "⚙️ REPORTE DE ERRORES", "### ¿Encontraste un fallo?\nReporta cualquier error técnico en el bot o la plataforma web.", "btn_bug", "Enviar Bug", "⚙️");
 });
 
 client.on('interactionCreate', async i => {
     if (i.isButton()) {
         if (i.customId === 'close_ticket') return i.channel.delete();
+        if (client.configGlobal.ticketsEnabled === 0) return i.reply({ content: "❌ Sistema apagado.", ephemeral: true });
+
+        const modal = new ModalBuilder().setCustomId(i.customId === 'btn_ticket' ? 'mdl_reporte' : 'mdl_bug').setTitle(i.customId === 'btn_ticket' ? 'Formulario de Reporte' : 'Reportar Bug');
         
-        const s = client.configGlobal.ticketsEnabled;
-        if (s === 0) return i.reply({ content: "❌ El sistema de soporte está desactivado temporalmente.", ephemeral: true });
-
         if (i.customId === 'btn_ticket') {
-            const m = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar Usuario');
-            m.addComponents(
+            modal.addComponents(
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('ID del Infractor').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Evidencia (Link)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Información Extra').setStyle(TextInputStyle.Paragraph).setRequired(false))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas (Links)').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('o').setLabel('Información Adicional').setStyle(TextInputStyle.Paragraph).setRequired(false))
             );
-            await i.showModal(m);
-        }
-
-        if (i.customId === 'btn_bug') {
-            const m = new ModalBuilder().setCustomId('mdl_bug').setTitle('Reportar Bug');
-            m.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bt').setLabel('Sistema (Web/Bot)').setStyle(TextInputStyle.Short).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bd').setLabel('Descripción del error').setStyle(TextInputStyle.Paragraph).setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bp').setLabel('Pasos para replicar').setStyle(TextInputStyle.Paragraph).setRequired(false))
+        } else {
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bt').setLabel('Sistema Afectado').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('bd').setLabel('Descripción del Fallo').setStyle(TextInputStyle.Paragraph).setRequired(true))
             );
-            await i.showModal(m);
         }
+        await i.showModal(modal);
     }
 
     if (i.isModalSubmit()) {
-        let title, fields = [], prefix, color = 0x2b2d31, thumb;
-
-        if (i.customId === 'mdl_reporte') {
-            prefix = '🎫-reporte'; title = '🛡️ SOLICITUD DE BANEO GLOBAL'; thumb = "https://i.imgur.com/vHq4MOn.png";
-            fields = [
-                { name: '### 👤 INFRACTOR', value: `> **ID:** \`${i.fields.getTextInputValue('u')}\`\n> **Motivo:** Venta/Distribución no autorizada`, inline: false },
-                { name: '### 🔗 EVIDENCIA', value: i.fields.getTextInputValue('e'), inline: false },
-                { name: '### 📝 DETALLES', value: `\`\`\`${i.fields.getTextInputValue('o') || 'Sin detalles.'}\`\`\``, inline: false },
-                { name: '### ⚖️ POLÍTICA', value: "*Este reporte es analizado para reducir la cantidad de filtras globalmente.*", inline: false }
-            ];
-        } else if (i.customId === 'mdl_bug') {
-            prefix = '🐛-bug'; title = '⚙️ REPORTE TÉCNICO'; color = 0xFFAA00; thumb = "https://i.imgur.com/8fO8z8f.png";
-            fields = [
-                { name: '### 💻 SISTEMA', value: `\`${i.fields.getTextInputValue('bt')}\``, inline: true },
-                { name: '### 📖 DESCRIPCIÓN', value: i.fields.getTextInputValue('bd'), inline: false },
-                { name: '### 🛠️ PASOS', value: `\`\`\`${i.fields.getTextInputValue('bp') || 'No indicados.'}\`\`\``, inline: false }
-            ];
-        }
-
+        const isBug = i.customId === 'mdl_bug';
         const ch = await i.guild.channels.create({
-            name: `${prefix}-${i.user.username}`,
+            name: `${isBug ? '🐛-bug' : '🎫-reporte'}-${i.user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -179,16 +134,49 @@ client.on('interactionCreate', async i => {
             ]
         });
 
-        const reportEmb = new EmbedBuilder()
-            .setAuthor({ name: `REMITENTE: ${i.user.tag}`, iconURL: i.user.displayAvatarURL() })
-            .setTitle(title).addFields(fields).setColor(color).setThumbnail(thumb)
-            .setFooter({ text: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ", iconURL: client.user.displayAvatarURL() }).setTimestamp();
+        // 1. EMBED DE BIENVENIDA (MODERNO)
+        const welcomeEmb = new EmbedBuilder()
+            .setTitle(`BIENVENIDO AL SOPORTE`)
+            .setDescription(
+                `Hola <@${i.user.id}>, gracias por contactar con **ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ**.\n\n` +
+                `### 📌 Instrucciones:\n` +
+                `> Por favor, bríndanos **capturas de pantalla, videos o archivos** adicionales que refuercen tu reporte.\n\n` +
+                `Un miembro de nuestro equipo <@&${ROL_TICKETS}> revisará la información en breve. Mantente atento a este canal.`
+            )
+            .setColor(0x2b2d31)
+            .setThumbnail(i.user.displayAvatarURL());
 
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Caso').setStyle(ButtonStyle.Danger).setEmoji('🔒'));
+        // 2. EMBED DE INFORMACIÓN TÉCNICA (MODERNO)
+        const infoEmb = new EmbedBuilder()
+            .setAuthor({ name: `REMITENTE: ${i.user.tag.toUpperCase()}`, iconURL: i.user.displayAvatarURL() })
+            .setTitle(isBug ? "🛠️ DATOS DEL INFORME TÉCNICO" : "📂 EXPEDIENTE DE SEGURIDAD")
+            .setColor(isBug ? 0xFFAA00 : 0x2b2d31)
+            .setDescription(`\u200B\n**Sincronización de Base de Datos:**\n> *Estado: Pendiente de Revisión*\n\u200B`);
 
-        await ch.send({ content: `<@${i.user.id}> | <@&${ROL_TICKETS}>`, embeds: [reportEmb], components: [row] });
-        await i.reply({ content: `✅ Caso abierto: ${ch}`, ephemeral: true });
+        if (isBug) {
+            infoEmb.addFields(
+                { name: "💻 SISTEMA", value: `\`\`\`${i.fields.getTextInputValue('bt')}\`\`\``, inline: true },
+                { name: "🔍 ESTADO", value: `\`🟠 Bug Report\``, inline: true },
+                { name: "📖 DESCRIPCIÓN", value: i.fields.getTextInputValue('bd') }
+            );
+        } else {
+            infoEmb.addFields(
+                { name: "👤 INFRACTOR (ID)", value: `\`\`\`${i.fields.getTextInputValue('u')}\`\`\``, inline: true },
+                { name: "⚖️ CATEGORÍA", value: `\`🛡️ Filtra\``, inline: true },
+                { name: "🔗 PRUEBAS", value: i.fields.getTextInputValue('e') },
+                { name: "📝 DETALLES", value: `\`\`\`${i.fields.getTextInputValue('o') || 'No se proporcionaron detalles adicionales.'}\`\`\`` }
+            );
+        }
+
+        infoEmb.setFooter({ text: "ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ • Gestión Interna", iconURL: client.user.displayAvatarURL() }).setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+        );
+
+        await ch.send({ content: `<@${i.user.id}> | <@&${ROL_TICKETS}>`, embeds: [welcomeEmb, infoEmb], components: [row] });
+        await i.reply({ content: `✅ **Ticket abierto correctamente:** ${ch}`, ephemeral: true });
     }
 });
 
-client.login(process.env.BOT_TOKEN);
+client.login("TOKEN_AQUÍ");
