@@ -50,7 +50,7 @@ client.once('ready', async () => {
 
             const embed = new EmbedBuilder()
                 .setTitle("🛰️ MONITOR DE ESTADO - ANTI-FILTRAS")
-                .setDescription("Estado actual de disponibilidad de los sistemas.")
+                .setDescription("Estado actual de disponibilidad de los sistemas sincronizado con la web.")
                 .addFields(
                     { name: "📩 Tickets", value: getStatus(data.ticketsEnabled), inline: true },
                     { name: "🚫 Baneos", value: getStatus(data.bansEnabled), inline: true },
