@@ -1,6 +1,5 @@
 const { 
     Client, 
-    GatewayIntentBits, 
     Collection, 
     EmbedBuilder, 
     ActionRowBuilder, 
@@ -18,7 +17,7 @@ const fs = require('node:fs');
 
 const client = new Client({ intents: [3276799] });
 client.commands = new Collection();
-client.configGlobal = { ticketsEnabled: 1, bansEnabled: 1, configEnabled: 1 };
+client.configGlobal = { webEnabled: 1, ticketsEnabled: 1, bansEnabled: 1, configEnabled: 1 };
 
 const ROL_TICKETS = '1433603806003990560';
 const ROL_STAFF_PING = '1433602018957594717';
@@ -36,66 +35,70 @@ client.once('ready', async () => {
     console.log(`✅ Bot Online: ${client.user.tag}`);
     client.user.setActivity('Sistemas de Seguridad', { type: ActivityType.Watching });
 
-    // --- LISTENER DE FIREBASE (STATUS ESPACIADO) ---
+    // --- LISTENER DE FIREBASE (EDICIÓN ESTRICTA) ---
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
         client.configGlobal = data;
 
         const statusChannel = await client.channels.fetch(CANAL_STATUS_WEB).catch(() => null);
-        if (statusChannel) {
-            const getStatus = (v) => v === 1 ? "🟢 **OPERATIVO**" : (v === 2 ? "🟡 **MANTENIMIENTO**" : "🔴 **DESACTIVADO**");
-            const embedColor = data.ticketsEnabled === 1 ? 0x00FF88 : (data.ticketsEnabled === 2 ? 0xFFCC00 : 0xFF3E3E);
+        if (!statusChannel) return;
 
-            // Construcción del contenido con saltos de línea para el efecto de renglón vacío
-            const statusDescription = [
-                `🛰️ **SISTEMA DE TICKETS**\n${getStatus(data.ticketsEnabled)}`,
-                `\n\u200B`, // Renglón vacío (caracter invisible)
-                `🚫 **BANEOS GLOBALES**\n${getStatus(data.bansEnabled)}`,
-                `\n\u200B`, // Renglón vacío (caracter invisible)
-                `⚙️ **CONFIGURACIÓN**\n${getStatus(data.configEnabled)}`
-            ].join('\n');
+        const getStatus = (v) => {
+            if (v === 1) return "🟢 **`OPERATIVO`**";
+            if (v === 2) return "🟡 **`MANTENIMIENTO`**";
+            return "🔴 **`DESACTIVADO`**";
+        };
 
-            const embed = new EmbedBuilder()
-                .setTitle("🛰️ MONITOR DE SISTEMAS")
-                .setDescription(statusDescription)
-                .setColor(embedColor)
-                .setThumbnail(client.user.displayAvatarURL())
-                .setFooter({ text: "Sincronización de Sistemas Activa", iconURL: client.user.displayAvatarURL() })
-                .setTimestamp();
+        const embedColor = data.webEnabled === 1 ? 0x2b2d31 : (data.webEnabled === 2 ? 0xFFCC00 : 0xFF3E3E);
 
-            // Lógica de Edición para evitar spam
-            const messages = await statusChannel.messages.fetch({ limit: 10 });
-            const lastStatusMsg = messages.filter(m => 
-                m.author.id === client.user.id && 
-                m.embeds[0]?.title === "🛰️ MONITOR DE SISTEMAS"
-            ).first();
+        // Formato solicitado: Título, Renglón, Opción, Estado
+        const description = [
+            "### Estado actual del bot y sus respectivos sistemas :\n",
+            "🌐 **PÁGINA WEB :**",
+            `${getStatus(data.webEnabled)}\n`,
+            "📩 **TICKETS :**",
+            `${getStatus(data.ticketsEnabled)}\n`,
+            "⚙️ **CONFIGURACIÓN :**",
+            `${getStatus(data.configEnabled)}\n`,
+            "🚫 **BANEOS GLOBALES :**",
+            `${getStatus(data.bansEnabled)}`
+        ].join('\n');
 
-            if (lastStatusMsg) {
-                await lastStatusMsg.edit({ 
-                    content: `🔄 **Sistemas actualizados**`, 
-                    embeds: [embed] 
-                }).catch(() => null);
-            } else {
-                statusChannel.send({ 
-                    content: `🔔 **Alerta de Sistemas:** <@&${ROL_STAFF_PING}>`, 
-                    embeds: [embed] 
-                });
-            }
+        const embed = new EmbedBuilder()
+            .setAuthor({ name: "ANTI-FILTRAS MONITOR", iconURL: client.user.displayAvatarURL() })
+            .setDescription(description)
+            .setColor(embedColor)
+            .setFooter({ text: "Sincronización en tiempo real con la base de datos" })
+            .setTimestamp();
+
+        // --- LÓGICA DE EDICIÓN ---
+        const messages = await statusChannel.messages.fetch({ limit: 10 });
+        const lastStatusMsg = messages.filter(m => m.author.id === client.user.id && m.embeds[0]?.author?.name === "ANTI-FILTRAS MONITOR").first();
+
+        if (lastStatusMsg) {
+            // EDITAR SIEMPRE
+            await lastStatusMsg.edit({ content: null, embeds: [embed] }).catch(() => null);
+        } else {
+            // SOLO SI NO EXISTE, MANDAR UNO NUEVO CON PING
+            statusChannel.send({ 
+                content: `🔔 **Alerta de Sistemas:** <@&${ROL_STAFF_PING}>`, 
+                embeds: [embed] 
+            });
         }
     });
 
-    // --- PANEL DE TICKETS ---
+    // --- PANEL DE TICKETS (LIMPIEZA) ---
     const channel = client.channels.cache.get(CANAL_TICKETS_ID);
     if (channel) {
-        const messages = await channel.messages.fetch({ limit: 10 });
+        const messages = await channel.messages.fetch({ limit: 5 });
         const botMsgs = messages.filter(m => m.author.id === client.user.id);
         if (botMsgs.size > 0) await channel.bulkDelete(botMsgs).catch(() => null);
 
         const embed = new EmbedBuilder()
             .setTitle("📩 Centro de Reportes")
             .setDescription("Presiona el botón para reportar un filtrador.")
-            .setColor("Red");
+            .setColor(0x2b2d31);
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('btn_ticket').setLabel('Reportar').setStyle(ButtonStyle.Danger).setEmoji('🛡️')
@@ -113,8 +116,8 @@ client.on('interactionCreate', async i => {
 
     if (i.isButton() && i.customId === 'btn_ticket') {
         const status = client.configGlobal.ticketsEnabled;
-        if (status === 0) return i.reply({ content: "❌ Sistema **Cerrado**.", ephemeral: true });
-        if (status === 2) return i.reply({ content: "🟡 Sistema en **Mantenimiento**.", ephemeral: true });
+        if (status === 0) return i.reply({ content: "❌ Sistema Cerrado.", ephemeral: true });
+        if (status === 2) return i.reply({ content: "🟡 Mantenimiento.", ephemeral: true });
 
         const modal = new ModalBuilder().setCustomId('mdl_reporte').setTitle('Reportar');
         modal.addComponents(
