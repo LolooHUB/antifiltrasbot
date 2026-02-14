@@ -16,8 +16,6 @@ const CANAL_BUGS_ID = '1471992338057527437';
 const CANAL_REPORTES_WEB = '1412420238284423208';
 const ROL_TICKETS = '1433603806003990560';
 
-let statusMessageId = null; // Para editar en lugar de borrar
-
 // Carga de comandos
 const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
 for (const file of commandFiles) {
@@ -26,10 +24,10 @@ for (const file of commandFiles) {
 }
 
 client.once('ready', async () => {
-    console.log(`✅ Sistema Blindado: ${client.user.tag}`);
+    console.log(`✅ Anti-Filtras Pro: ${client.user.tag}`);
     client.user.setActivity('ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ', { type: ActivityType.Watching });
 
-    // --- MONITOR DE STATUS (EDICIÓN INTELIGENTE) ---
+    // --- MONITOR DE STATUS (EDICIÓN PARA EVITAR BORRADOS) ---
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
@@ -53,8 +51,8 @@ client.once('ready', async () => {
             .setThumbnail('attachment://logo.webp')
             .setColor("#2b2d31");
 
-        const msgs = await chan.messages.fetch({ limit: 5 });
-        const lastMsg = msgs.filter(m => m.author.id === client.user.id).first();
+        const msgs = await chan.messages.fetch({ limit: 10 });
+        const lastMsg = msgs.find(m => m.author.id === client.user.id);
 
         if (lastMsg) {
             await lastMsg.edit({ embeds: [embedStatus], files: [logo] }).catch(() => null);
@@ -63,7 +61,7 @@ client.once('ready', async () => {
         }
     });
 
-    // --- MONITOR DE REPORTES WEB (Para el canal 1412420238284423208) ---
+    // --- MONITOR DE REPORTES WEB (WEB_REPORTS -> Discord) ---
     db.collection('WEB_REPORTS').onSnapshot(snap => {
         snap.docChanges().forEach(async change => {
             if (change.type === 'added') {
@@ -74,11 +72,13 @@ client.once('ready', async () => {
                         .setAuthor({ name: "NUEVO REPORTE EXTERNO (WEB)", iconURL: 'attachment://logo.webp' })
                         .setColor("#00ff88")
                         .addFields(
-                            { name: "👤 Usuario ID", value: `\`${data.infractorID}\``, inline: true },
+                            { name: "👤 Usuario", value: `\`${data.infractorUser || 'Desconocido'}\``, inline: true },
+                            { name: "🆔 ID", value: `\`${data.infractorID}\``, inline: true },
                             { name: "📝 Detalles", value: data.comentario || "Sin descripción" }
                         )
-                        .setImage(data.evidenciaLink) // Muestra la imagen si existe
+                        .setThumbnail('attachment://logo.webp')
                         .setTimestamp();
+                    if (data.evidenciaLink) embed.setImage(data.evidenciaLink);
                     await chan.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] });
                 }
             }
@@ -89,64 +89,81 @@ client.once('ready', async () => {
 client.on('interactionCreate', async i => {
     if (i.isChatInputCommand()) {
         const command = client.commands.get(i.commandName);
-        if (command) await command.execute(i);
+        if (command) await command.execute(i).catch(() => null);
     }
 
     if (i.isButton()) {
         if (i.customId === 'close_ticket') {
             const logChan = await client.channels.fetch(CANAL_TRANSCRIPTS).catch(() => null);
             const msgs = await i.channel.messages.fetch();
-            let txt = msgs.reverse().map(m => `[${m.author.tag}]: ${m.content}`).join('\n');
-            if (logChan) await logChan.send({ content: `📂 Transcript: ${i.channel.name}`, files: [{ attachment: Buffer.from(txt), name: 'ticket.txt' }] });
-            return i.channel.delete();
+            let txt = msgs.reverse().map(m => `[${m.createdAt.toLocaleString()}] ${m.author.tag}: ${m.content}`).join('\n');
+            if (logChan) await logChan.send({ content: `📂 Transcript: ${i.channel.name}`, files: [{ attachment: Buffer.from(txt), name: `${i.channel.name}.txt` }] });
+            return i.channel.delete().catch(() => null);
         }
 
-        // Sistema de Tickets / Bugs
         const isBug = i.customId === 'btn_bug';
-        const modal = new ModalBuilder().setCustomId(isBug ? 'mdl_bug' : 'mdl_reporte').setTitle(isBug ? 'Reportar Bug' : 'Reportar Filtración');
-        
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('Usuario / Título').setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Descripción / Pruebas').setStyle(TextInputStyle.Paragraph).setRequired(true))
-        );
+        if (!isBug && client.configGlobal?.ticketsEnabled === 0) return i.reply({ content: "❌ Sistema de reportes desactivado.", ephemeral: true });
+
+        const modal = new ModalBuilder()
+            .setCustomId(isBug ? 'mdl_bug' : 'mdl_reporte')
+            .setTitle(isBug ? 'Reporte de Error Técnico' : 'Reportar Filtrador');
+
+        if (isBug) {
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('Título del Error').setStyle(TextInputStyle.Short).setPlaceholder('Ej: El comando /setup no carga').setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Descripción detallada').setStyle(TextInputStyle.Paragraph).setRequired(true))
+            );
+        } else {
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user').setLabel('Usuario Infractor').setStyle(TextInputStyle.Short).setPlaceholder('Nombre o Tag').setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('id').setLabel('ID de Discord').setStyle(TextInputStyle.Short).setPlaceholder('ID numérica').setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas y Detalles').setStyle(TextInputStyle.Paragraph).setPlaceholder('Links de imágenes o descripción').setRequired(true))
+            );
+        }
         await i.showModal(modal);
     }
 
     if (i.isModalSubmit()) {
         await i.deferReply({ ephemeral: true });
         const isBug = i.customId === 'mdl_bug';
-        const targetChanId = isBug ? CANAL_BUGS_ID : null;
-
+        
         const ch = await i.guild.channels.create({
-            name: `${isBug ? 'bug' : 'ticket'}-${i.user.username}`,
+            name: `${isBug ? '🐛' : '🎫'}-${i.user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
                 { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
         });
 
         const logo = new AttachmentBuilder('./logo.webp');
         const embed = new EmbedBuilder()
-            .setTitle(isBug ? "⚙️ REPORTE DE ERROR" : "🛡️ REPORTE DE FILTRACIÓN")
-            .addFields(
-                { name: "Enviado por:", value: `<@${i.user.id}>` },
-                { name: "Información:", value: i.fields.getTextInputValue('u') },
-                { name: "Detalles:", value: i.fields.getTextInputValue('e') }
-            )
+            .setAuthor({ name: isBug ? "REPORTE DE BUG" : "REPORTE DE FILTRACIÓN", iconURL: 'attachment://logo.webp' })
+            .setColor(isBug ? "#ffaa00" : "#ff0000")
             .setThumbnail('attachment://logo.webp')
-            .setColor(isBug ? "#ffcc00" : "#00d9ff");
+            .setTimestamp();
 
-        await ch.send({ content: `<@&${ROL_TICKETS}>`, embeds: [embed], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar').setStyle(ButtonStyle.Danger))], files: [logo] });
-        
-        // Si es bug, mandar copia al canal de logs de bugs
         if (isBug) {
-            const bugLog = await client.channels.fetch(CANAL_BUGS_ID).catch(() => null);
-            if (bugLog) bugLog.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] });
+            embed.addFields(
+                { name: "📌 Título", value: i.fields.getTextInputValue('u') },
+                { name: "📝 Descripción", value: i.fields.getTextInputValue('e') }
+            );
+            // Enviar copia al canal de BUGS
+            const bugChan = await client.channels.fetch(CANAL_BUGS_ID).catch(() => null);
+            if (bugChan) bugChan.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] });
+        } else {
+            embed.addFields(
+                { name: "👤 Usuario", value: i.fields.getTextInputValue('user'), inline: true },
+                { name: "🆔 ID", value: i.fields.getTextInputValue('id'), inline: true },
+                { name: "📄 Evidencia", value: i.fields.getTextInputValue('e') }
+            );
         }
 
-        await i.editReply(`✅ Creado en ${ch}`);
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Ticket').setStyle(ButtonStyle.Danger));
+        await ch.send({ content: `<@${i.user.id}> | <@&${ROL_TICKETS}>`, embeds: [embed], components: [row], files: [logo] });
+        
+        await i.editReply(`✅ Canal creado: ${ch}`);
     }
 });
 
