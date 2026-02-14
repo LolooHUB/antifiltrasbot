@@ -1,7 +1,7 @@
 const { 
     Client, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, 
     ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, 
-    PermissionFlagsBits, ActivityType, Collection, AttachmentBuilder 
+    PermissionFlagsBits, ActivityType, Collection, AttachmentBuilder, Events 
 } = require('discord.js');
 const { db } = require('./firebase');
 const fs = require('fs');
@@ -23,16 +23,16 @@ for (const file of commandFiles) {
     client.commands.set(command.data.name, command);
 }
 
-client.once('ready', async () => {
-    console.log(`✅ Anti-Filtras Pro: ${client.user.tag}`);
+// Evento corregido a clientReady (v14+)
+client.once(Events.ClientReady, async () => {
+    console.log(`✅ Sistema Blindado: ${client.user.tag}`);
     client.user.setActivity('ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ', { type: ActivityType.Watching });
 
-    // --- MONITOR DE STATUS (EDICIÓN PARA EVITAR BORRADOS) ---
+    // MONITOR DE STATUS
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
         client.configGlobal = data;
-
         const chan = await client.channels.fetch(CANAL_STATUS_WEB).catch(() => null);
         if (!chan) return;
 
@@ -51,17 +51,13 @@ client.once('ready', async () => {
             .setThumbnail('attachment://logo.webp')
             .setColor("#2b2d31");
 
-        const msgs = await chan.messages.fetch({ limit: 10 });
-        const lastMsg = msgs.find(m => m.author.id === client.user.id);
-
-        if (lastMsg) {
-            await lastMsg.edit({ embeds: [embedStatus], files: [logo] }).catch(() => null);
-        } else {
-            await chan.send({ embeds: [embedStatus], files: [logo] }).catch(() => null);
-        }
+        const msgs = await chan.messages.fetch({ limit: 10 }).catch(() => null);
+        const lastMsg = msgs?.find(m => m.author.id === client.user.id);
+        if (lastMsg) await lastMsg.edit({ embeds: [embedStatus], files: [logo] }).catch(() => null);
+        else await chan.send({ embeds: [embedStatus], files: [logo] }).catch(() => null);
     });
 
-    // --- MONITOR DE REPORTES WEB (WEB_REPORTS -> Discord) ---
+    // MONITOR DE REPORTES WEB (BLINDADO CONTRA LINKS CORRUPTOS)
     db.collection('WEB_REPORTS').onSnapshot(snap => {
         snap.docChanges().forEach(async change => {
             if (change.type === 'added') {
@@ -78,15 +74,20 @@ client.once('ready', async () => {
                         )
                         .setThumbnail('attachment://logo.webp')
                         .setTimestamp();
-                    if (data.evidenciaLink) embed.setImage(data.evidenciaLink);
-                    await chan.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] });
+
+                    // VALIDACIÓN DE URL PARA EVITAR CRASH
+                    if (data.evidenciaLink && data.evidenciaLink.startsWith('http')) {
+                        embed.setImage(data.evidenciaLink);
+                    }
+
+                    await chan.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] }).catch(console.error);
                 }
             }
         });
     });
 });
 
-client.on('interactionCreate', async i => {
+client.on(Events.InteractionCreate, async i => {
     if (i.isChatInputCommand()) {
         const command = client.commands.get(i.commandName);
         if (command) await command.execute(i).catch(() => null);
@@ -102,22 +103,20 @@ client.on('interactionCreate', async i => {
         }
 
         const isBug = i.customId === 'btn_bug';
-        if (!isBug && client.configGlobal?.ticketsEnabled === 0) return i.reply({ content: "❌ Sistema de reportes desactivado.", ephemeral: true });
-
         const modal = new ModalBuilder()
             .setCustomId(isBug ? 'mdl_bug' : 'mdl_reporte')
-            .setTitle(isBug ? 'Reporte de Error Técnico' : 'Reportar Filtrador');
+            .setTitle(isBug ? 'Reporte de Error' : 'Reportar Filtrador');
 
         if (isBug) {
             modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('Título del Error').setStyle(TextInputStyle.Short).setPlaceholder('Ej: El comando /setup no carga').setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Descripción detallada').setStyle(TextInputStyle.Paragraph).setRequired(true))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('u').setLabel('Título').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Descripción').setStyle(TextInputStyle.Paragraph).setRequired(true))
             );
         } else {
             modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user').setLabel('Usuario Infractor').setStyle(TextInputStyle.Short).setPlaceholder('Nombre o Tag').setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('id').setLabel('ID de Discord').setStyle(TextInputStyle.Short).setPlaceholder('ID numérica').setRequired(true)),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Pruebas y Detalles').setStyle(TextInputStyle.Paragraph).setPlaceholder('Links de imágenes o descripción').setRequired(true))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user').setLabel('Nombre Filtra').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('id').setLabel('ID Discord').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e').setLabel('Evidencia (Link)').setStyle(TextInputStyle.Paragraph).setRequired(true))
             );
         }
         await i.showModal(modal);
@@ -126,13 +125,12 @@ client.on('interactionCreate', async i => {
     if (i.isModalSubmit()) {
         await i.deferReply({ ephemeral: true });
         const isBug = i.customId === 'mdl_bug';
-        
         const ch = await i.guild.channels.create({
-            name: `${isBug ? '🐛' : '🎫'}-${i.user.username}`,
+            name: `${isBug ? 'bug' : 'ticket'}-${i.user.username}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+                { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
                 { id: ROL_TICKETS, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
         });
@@ -141,17 +139,12 @@ client.on('interactionCreate', async i => {
         const embed = new EmbedBuilder()
             .setAuthor({ name: isBug ? "REPORTE DE BUG" : "REPORTE DE FILTRACIÓN", iconURL: 'attachment://logo.webp' })
             .setColor(isBug ? "#ffaa00" : "#ff0000")
-            .setThumbnail('attachment://logo.webp')
-            .setTimestamp();
+            .setThumbnail('attachment://logo.webp');
 
         if (isBug) {
-            embed.addFields(
-                { name: "📌 Título", value: i.fields.getTextInputValue('u') },
-                { name: "📝 Descripción", value: i.fields.getTextInputValue('e') }
-            );
-            // Enviar copia al canal de BUGS
-            const bugChan = await client.channels.fetch(CANAL_BUGS_ID).catch(() => null);
-            if (bugChan) bugChan.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] });
+            embed.addFields({ name: "📌 Título", value: i.fields.getTextInputValue('u') }, { name: "📝 Descripción", value: i.fields.getTextInputValue('e') });
+            const bugLog = await client.channels.fetch(CANAL_BUGS_ID).catch(() => null);
+            if (bugLog) bugLog.send({ embeds: [embed], files: [new AttachmentBuilder('./logo.webp')] });
         } else {
             embed.addFields(
                 { name: "👤 Usuario", value: i.fields.getTextInputValue('user'), inline: true },
@@ -160,10 +153,8 @@ client.on('interactionCreate', async i => {
             );
         }
 
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Ticket').setStyle(ButtonStyle.Danger));
-        await ch.send({ content: `<@${i.user.id}> | <@&${ROL_TICKETS}>`, embeds: [embed], components: [row], files: [logo] });
-        
-        await i.editReply(`✅ Canal creado: ${ch}`);
+        await ch.send({ content: `<@&${ROL_TICKETS}>`, embeds: [embed], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar').setStyle(ButtonStyle.Danger))], files: [logo] });
+        await i.editReply(`✅ Creado: ${ch}`);
     }
 });
 
