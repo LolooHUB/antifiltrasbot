@@ -25,6 +25,7 @@ module.exports = {
         }
 
         const logo = new AttachmentBuilder('./logo.webp');
+        
         const config = {
             guildId: interaction.guild.id,
             serverName: interaction.guild.name,
@@ -36,6 +37,7 @@ module.exports = {
             ultimaActualizacion: new Date()
         };
 
+        // Guardar configuración en Firebase
         await db.collection('SERVIDORES').doc(interaction.guild.id).set(config, { merge: true });
 
         const setupEmbed = new EmbedBuilder()
@@ -44,11 +46,18 @@ module.exports = {
             .setDescription(`La seguridad ha sido establecida con éxito en **${interaction.guild.name}**.`)
             .addFields(
                 { name: "🛡️ Modo de Acción", value: `\`${config.modo}\``, inline: true },
-                { name: "👮 Rol Staff", value: `<@&${config.rolStaff}>`, inline: true }
+                { name: "👮 Rol Staff", value: `<@&${config.rolStaff}>`, inline: true },
+                { name: "📝 Logs de Baneo", value: `<#${config.canalSanciones}>`, inline: true },
+                { name: "⚠️ Canal de Alertas", value: `<#${config.canalAvisos}>`, inline: true }
             )
             .setThumbnail('attachment://logo.webp')
-            .setFooter({ text: "Protección Global Activa" });
+            .setFooter({ text: "Protección Global Activa • Anti-Filtras" })
+            .setTimestamp();
 
-        await interaction.reply({ embeds: [setupEmbed], files: [logo], ephemeral: true });
+        await interaction.reply({ 
+            embeds: [setupEmbed], 
+            files: [logo], 
+            ephemeral: true 
+        });
     }
 };
