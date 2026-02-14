@@ -1,26 +1,27 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { db } = require('../firebase');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('filtra-ban')
-        .setDescription('🚫 Baneo global y registro de filtrador')
-        .addStringOption(o => o.setName('usuario').setDescription('Nombre del infractor').setRequired(true))
-        .addStringOption(o => o.setName('id').setDescription('ID de Discord').setRequired(true))
-        .addStringOption(o => o.setName('motivo').setDescription('Razón del baneo').setRequired(true))
-        .addAttachmentOption(o => o.setName('evidencia').setDescription('Sube la captura de prueba').setRequired(true)),
+        .setDescription('🚫 Registrar un nuevo filtrador en el sistema global')
+        .addStringOption(o => o.setName('usuario').setDescription('Nombre/Tag del infractor').setRequired(true))
+        .addStringOption(o => o.setName('id').setDescription('ID de Discord del infractor').setRequired(true))
+        .addStringOption(o => o.setName('motivo').setDescription('Razón detallada de la sanción').setRequired(true))
+        .addAttachmentOption(o => o.setName('evidencia').setDescription('Sube la prueba visual').setRequired(true)),
 
     async execute(interaction) {
         const CANAL_TRANSCRIPTS = '1433599228479148082';
         const logGlobal = await interaction.client.channels.fetch(CANAL_TRANSCRIPTS).catch(() => null);
+        const logo = new AttachmentBuilder('./logo.webp'); // Usando tu archivo local
 
         if (interaction.client.configGlobal?.bansEnabled === 0) {
-            return interaction.reply({ content: "❌ Los baneos globales están desactivados.", ephemeral: true });
+            return interaction.reply({ content: "❌ El sistema de baneos globales está desactivado temporalmente.", ephemeral: true });
         }
 
         const STAFF_ROLES = ['1433601009284026540', '1400715562568519781', '1433608596871970967', '1400711250878529556'];
         if (!STAFF_ROLES.some(id => interaction.member.roles.cache.has(id))) {
-            return interaction.reply({ content: "❌ No tienes rango Staff Global.", ephemeral: true });
+            return interaction.reply({ content: "❌ Acceso denegado: Se requiere rol de Staff Global.", ephemeral: true });
         }
 
         const user = interaction.options.getString('usuario');
@@ -30,51 +31,51 @@ module.exports = {
 
         await interaction.deferReply();
 
-        // Guardar en Firebase
         await db.collection('WEB_REPORTS').doc(id).set({ 
             infractorUser: user,
             infractorID: id, 
             comentario: mot, 
-            evidenciaLink: file.url, // Guardamos la URL del archivo subido a Discord
+            evidenciaLink: file.url,
+            adminResponsable: interaction.user.tag,
             timestamp: new Date() 
         });
 
+        const embedBan = new EmbedBuilder()
+            .setAuthor({ name: "🚨 NUEVO FILTRADOR REGISTRADO", iconURL: 'attachment://logo.webp' })
+            .setDescription(`👤 **Usuario Marcado**\n<@${id}> (ID: ${id})\n\n⚖️ **Motivo de Sanción**\n${mot}\n\n👮 **Admin Responsable**\n${interaction.user.username}`)
+            .setThumbnail('attachment://logo.webp')
+            .setColor("#ff0000")
+            .setFooter({ text: "Sistema Anti-Filtras Global" })
+            .setTimestamp();
+
         const servidores = await db.collection('SERVIDORES').get();
-        let bansExitosos = 0;
-        let fallos = [];
+        let conteo = 0;
+        let errores = [];
 
         for (const doc of servidores.docs) {
             const s = doc.data();
             const guild = await interaction.client.guilds.fetch(s.guildId).catch(() => null);
-            
-            if (!guild) {
-                fallos.push(`Servidor no encontrado o bot expulsado (ID: ${s.guildId})`);
-                continue;
-            }
+            if (!guild) continue;
 
             try {
                 if (s.modo === 'AutoBan') {
                     await guild.members.ban(id, { reason: `Filtra Global: ${mot}` });
-                    bansExitosos++;
+                    conteo++;
+                    const logLocal = await guild.channels.fetch(s.canalSanciones).catch(() => null);
+                    if (logLocal) await logLocal.send({ embeds: [embedBan], files: [logo] });
                 } else {
                     const avisos = await guild.channels.fetch(s.canalAvisos).catch(() => null);
-                    if (avisos) avisos.send(`⚠️ **Alerta**: Filtrador **${user}** detectado.`);
+                    if (avisos) await avisos.send({ content: `⚠️ **ALERTA DE FILTRADOR**`, embeds: [embedBan], files: [logo] });
                 }
             } catch (err) {
-                fallos.push(`Error en **${guild.name}**: ${err.message}`);
+                errores.push(`Fallo en **${guild.name}**: ${err.message}`);
             }
         }
 
-        // Reportar fallos en Transcripts
-        if (fallos.length > 0 && logGlobal) {
-            logGlobal.send({
-                embeds: [new EmbedBuilder()
-                    .setTitle("⚠️ Reporte de Errores en Propagación")
-                    .setDescription(`Filtra: ${user} (\`${id}\`)\n\n${fallos.join('\n')}`)
-                    .setColor("Orange")]
-            });
+        if (errores.length > 0 && logGlobal) {
+            await logGlobal.send(`⚠️ **Reporte de fallos en baneo global (${user}):**\n\`\`\`${errores.join('\n')}\`\`\``);
         }
 
-        await interaction.editReply(`✅ **${user}** procesado. Baneado en **${bansExitosos}** servidores.`);
+        await interaction.editReply({ content: `✅ **Registro Exitoso**. El usuario ha sido procesado en **${conteo}** servidores.`, embeds: [embedBan], files: [logo] });
     }
 };
