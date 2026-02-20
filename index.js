@@ -9,26 +9,26 @@ const fs = require('fs');
 const client = new Client({ intents: [3276799] });
 client.commands = new Collection();
 
-// IDs CONFIG
+// --- CONFIGURACIÓN DE CANALES ---
 const CANAL_STATUS_WEB = '1471651769565315072';
 const CANAL_TRANSCRIPTS = '1433599228479148082';
 const CANAL_BUGS_ID = '1471992338057527437';
 const CANAL_REPORTES_WEB = '1412420238284423208';
 const ROL_TICKETS = '1433603806003990560';
 
-// Carga de comandos
+// Carga de comandos Slash
 const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
 for (const file of commandFiles) {
     const command = require(`./commands/${file}`);
     client.commands.set(command.data.name, command);
 }
 
-// Evento corregido v15
+// --- INICIO DEL BOT ---
 client.once(Events.ClientReady, async () => {
     console.log(`✅ Anti-Filtras Pro: ${client.user.tag}`);
     client.user.setActivity('ᴀɴᴛɪ-ꜰɪʟᴛʀᴀꜱ ᴄᴏᴍᴍᴜɴɪᴛʏ', { type: ActivityType.Watching });
 
-    // STATUS MONITOR (EDICIÓN)
+    // MONITOR DE STATUS (Edita para evitar parpadeos y borrados)
     db.collection('BOT_CONTROL').doc('settings').onSnapshot(async (doc) => {
         const data = doc.data();
         if (!data) return;
@@ -57,7 +57,7 @@ client.once(Events.ClientReady, async () => {
         else await chan.send({ embeds: [embedStatus], files: [logo] }).catch(() => null);
     });
 
-    // MONITOR WEB_REPORTS (BLINDAJE TOTAL CONTRA CRASH)
+    // MONITOR WEB_REPORTS (Blindado contra URLs inválidas tipo "tesdt")
     db.collection('WEB_REPORTS').onSnapshot(snap => {
         snap.docChanges().forEach(async change => {
             if (change.type === 'added') {
@@ -77,8 +77,7 @@ client.once(Events.ClientReady, async () => {
                     .setThumbnail('attachment://logo.webp')
                     .setTimestamp();
 
-                // PROTECCIÓN: Solo pone imagen si es un link de Discord o URL real
-                if (data.evidenciaLink && data.evidenciaLink.startsWith('http')) {
+                if (data.evidenciaLink && typeof data.evidenciaLink === 'string' && data.evidenciaLink.startsWith('http')) {
                     embed.setImage(data.evidenciaLink);
                 }
 
@@ -88,6 +87,38 @@ client.once(Events.ClientReady, async () => {
     });
 });
 
+// --- COMANDOS DE PREFIJO (!) ---
+client.on(Events.MessageCreate, async (message) => {
+    if (!message.content.startsWith('!') || message.author.bot || !message.guild) return;
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+
+    if (commandName === 'servers') {
+        const STAFF_ROLES = ['1433601009284026540', '1400715562568519781', '1433608596871970967', '1400711250878529556'];
+        const isStaff = message.member && STAFF_ROLES.some(id => message.member.roles.cache.has(id));
+        
+        if (!isStaff && message.author.id !== message.guild.ownerId) {
+            return message.reply("❌ Acceso denegado.");
+        }
+
+        const logo = new AttachmentBuilder('./logo.webp');
+        const guilds = client.guilds.cache;
+        const lista = guilds.map(g => `• **${g.name}** \`(${g.id})\` - 👥 ${g.memberCount}`).join('\n');
+
+        const embed = new EmbedBuilder()
+            .setAuthor({ name: "RED DE SEGURIDAD", iconURL: 'attachment://logo.webp' })
+            .setTitle(`Conectado a ${guilds.size} servidores`)
+            .setDescription(lista.length > 2048 ? lista.substring(0, 2045) + "..." : lista)
+            .setThumbnail('attachment://logo.webp')
+            .setColor("#2b2d31")
+            .setTimestamp();
+
+        await message.reply({ embeds: [embed], files: [logo] }).catch(() => null);
+    }
+});
+
+// --- INTERACCIONES (SLASH, BOTONES, MODALES) ---
 client.on(Events.InteractionCreate, async i => {
     if (i.isChatInputCommand()) {
         const command = client.commands.get(i.commandName);
@@ -153,40 +184,7 @@ client.on(Events.InteractionCreate, async i => {
 
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar').setStyle(ButtonStyle.Danger));
         await ch.send({ content: `<@&${ROL_TICKETS}>`, embeds: [embed], components: [row], files: [logo] });
-        await i.editReply(`✅ Canal: ${ch}`);
-    }
-});
-
-client.on(Events.MessageCreate, async (message) => {
-    // Prefijo !
-    if (!message.content.startsWith('!') || message.author.bot) return;
-
-    const args = message.content.slice(1).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    if (command === 'servers') {
-        // BLINDAJE: Solo tú o los Staff Globales definidos antes pueden ver esto
-        const STAFF_ROLES = ['1433601009284026540', '1400715562568519781', '1433608596871970967', '1400711250878529556'];
-        if (!STAFF_ROLES.some(id => message.member.roles.cache.has(id)) && message.author.id !== message.guild.ownerId) {
-            return message.reply("❌ No tienes permisos para ver la red de servidores.");
-        }
-
-        const logo = new AttachmentBuilder('./logo.webp');
-        const guilds = client.guilds.cache;
-        
-        // Mapear la lista de servidores
-        const lista = guilds.map(g => `• **${g.name}** \`(${g.id})\` - 👥 ${g.memberCount}`).join('\n');
-
-        const embed = new EmbedBuilder()
-            .setAuthor({ name: "RED DE SEGURIDAD ANTI-FILTRAS", iconURL: 'attachment://logo.webp' })
-            .setTitle(`Conectado actualmente a ${guilds.size} servidores`)
-            .setDescription(lista.length > 2048 ? lista.substring(0, 2045) + "..." : lista)
-            .setThumbnail('attachment://logo.webp')
-            .setColor("#2b2d31")
-            .setFooter({ text: "Sistema de Monitoreo Global" })
-            .setTimestamp();
-
-        await message.reply({ embeds: [embed], files: [logo] });
+        await i.editReply(`✅ Canal creado: ${ch}`);
     }
 });
 
